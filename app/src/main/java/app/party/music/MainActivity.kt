@@ -89,12 +89,20 @@ class MainActivity : Activity() {
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
+        // YouTube flags bare WebViews as bots ("sign in to confirm"). Present a real Chrome
+        // identity plus full cookie support so the iframe player behaves like a normal browser.
+        val cookieManager = android.webkit.CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        cookieManager.setAcceptThirdPartyCookies(web, true)
+
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = false
             javaScriptCanOpenWindowsAutomatically = true
             cacheMode = WebSettings.LOAD_DEFAULT
+            userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
         }
         web.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
