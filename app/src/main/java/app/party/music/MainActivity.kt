@@ -128,6 +128,15 @@ class MainActivity : Activity() {
 
     // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
 
+    override fun onStop() {
+        super.onStop()
+        // The moment the activity hides, Chromium starts winding the WebView down (timers
+        // throttled, media pipeline idled). Force it back to the live state so the party keeps
+        // sounding from the background; the foreground service + wake lock keep the process alive.
+        web.onResume()
+        web.resumeTimers()
+    }
+
     @Deprecated("Handled below")
     override fun onBackPressed() {
         if (customView != null) {
