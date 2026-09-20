@@ -46,7 +46,10 @@ class MusicService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        return Notification.Builder(this, "music")
+        @Suppress("DEPRECATION")
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "music")
+        else Notification.Builder(this)
+        return builder
             .setContentTitle("Music Watch Party")
             .setContentText("Party chal rahi hai — background playback active")
             .setSmallIcon(android.R.drawable.ic_media_play)
