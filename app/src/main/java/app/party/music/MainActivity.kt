@@ -3,12 +3,19 @@ package app.party.music
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.PixelFormat
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -20,18 +27,25 @@ import android.widget.ProgressBar
 import android.widget.TextView
 
 /**
- * Hosts the watch-party web app in a WebView that is deliberately never paused, so the party
- * (YouTube iframe or MP3 audio) keeps sounding while the app is backgrounded or the screen is
- * off. A foreground media service + wake lock keep the process and CPU alive; Android treats us
- * like a music app.
+ * Hosts the watch-party web app in a WebView that must keep sounding in the background.
+ *
+ * Chromium idles a WebView's media pipeline as soon as the hosting activity hides, so this
+ * activity re-parents the live WebView into a system overlay window (1px, invisible) whenever
+ * the app backgrounds: the WebView then stays "visible" to Chromium forever, and the foreground
+ * service + wake lock keep the process and CPU alive. Without the overlay permission it falls
+ * back to the force-resume tricks.
  */
 class MainActivity : Activity() {
 
+    private lateinit var root: FrameLayout
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var bar: ProgressBar
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var inOverlay = false
+
+    private val wm by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -39,7 +53,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val root = FrameLayout(this)
+        root = FrameLayout(this)
         root.setBackgroundColor(Color.parseColor("#0d0716"))
 
         web = WebView(this)
@@ -48,7 +62,7 @@ class MainActivity : Activity() {
 
         bar = ProgressBar(this)
         val bp = FrameLayout.LayoutParams(-2, -2)
-        bp.gravity = android.view.Gravity.CENTER
+        bp.gravity = Gravity.CENTER
         root.addView(bar, bp)
 
         status = TextView(this)
@@ -56,7 +70,7 @@ class MainActivity : Activity() {
         status.text = "Party load ho rahi hai..."
         status.textSize = 16f
         val sp = FrameLayout.LayoutParams(-2, -2)
-        sp.gravity = android.view.Gravity.CENTER
+        sp.gravity = Gravity.CENTER
         sp.topMargin = 120
         root.addView(status, sp)
 
@@ -111,7 +125,18 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
-        // Crash-safe: even if the service fails on some OEM Android, the app itself must open.
+        // The overlay permission is what makes true background playback possible.
+        if (!Settings.canDrawOverlays(this)) {
+            runCatching {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            }
+        }
+
         try {
             MusicService.start(this)
         } catch (t: Throwable) {
@@ -123,18 +148,44 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (inOverlay) {
+            runCatching { wm.removeView(web) }
+            inOverlay = false
+            if (web.parent == null) root.addView(web, 0, FrameLayout.LayoutParams(-1, -1))
+        }
         web.onResume()
     }
 
-    // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
-
     override fun onStop() {
         super.onStop()
-        // The moment the activity hides, Chromium starts winding the WebView down (timers
-        // throttled, media pipeline idled). Force it back to the live state so the party keeps
-        // sounding from the background; the foreground service + wake lock keep the process alive.
+        // Chromium idles hidden WebViews; an overlay window keeps this one "visible" forever.
+        if (Settings.canDrawOverlays(this) && !inOverlay) {
+            (web.parent as? ViewGroup)?.removeView(web)
+            try {
+                wm.addView(web, overlayParams())
+                inOverlay = true
+            } catch (t: Throwable) {
+                Log.e("MusicParty", "overlay failed", t)
+                if (web.parent == null) root.addView(web, 0, FrameLayout.LayoutParams(-1, -1))
+            }
+        }
         web.onResume()
         web.resumeTimers()
+    }
+
+    private fun overlayParams(): WindowManager.LayoutParams {
+        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        return WindowManager.LayoutParams(
+            1, 1, type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            alpha = 0.01f
+        }
     }
 
     @Deprecated("Handled below")
