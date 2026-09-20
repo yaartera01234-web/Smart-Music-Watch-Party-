@@ -3,19 +3,14 @@ package app.party.music
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.Intent
+import android.app.PictureInPictureParams
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.PixelFormat
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -25,15 +20,20 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import java.io.PrintWriter
+import java.io.StringWriter
+import java.util.Date
 
 /**
- * Hosts the watch-party web app in a WebView that must keep sounding in the background.
+ * Hosts the watch-party web app in a WebView.
  *
- * Chromium idles a WebView's media pipeline as soon as the hosting activity hides, so this
- * activity re-parents the live WebView into a system overlay window (1px, invisible) whenever
- * the app backgrounds: the WebView then stays "visible" to Chromium forever, and the foreground
- * service + wake lock keep the process and CPU alive. Without the overlay permission it falls
- * back to the force-resume tricks.
+ * Background strategy: Picture-in-Picture. When the user leaves (home button), the activity
+ * continues as the system's little PiP window, so the WebView never becomes "hidden" and
+ * Chromium keeps the party sounding — the same mechanism YouTube's own app uses. The foreground
+ * service + wake lock additionally keep the process and CPU alive.
+ *
+ * A global crash handler writes any fatal error to crash.txt; on the next launch the trace is
+ * shown on screen so it can be photographed and diagnosed without logcat.
  */
 class MainActivity : Activity() {
 
@@ -43,15 +43,22 @@ class MainActivity : Activity() {
     private lateinit var bar: ProgressBar
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-    private var inOverlay = false
-
-    private val wm by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Self-reporting crashes: write trace to a file, show it next launch.
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val sw = StringWriter()
+                error.printStackTrace(PrintWriter(sw))
+                getFileStreamPath("crash.txt").writeText("${Date()}\n${sw}")
+            }
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
 
         root = FrameLayout(this)
         root.setBackgroundColor(Color.parseColor("#0d0716"))
@@ -67,12 +74,18 @@ class MainActivity : Activity() {
 
         status = TextView(this)
         status.setTextColor(Color.WHITE)
-        status.text = "Party load ho rahi hai..."
-        status.textSize = 16f
+        status.textSize = 14f
         val sp = FrameLayout.LayoutParams(-2, -2)
         sp.gravity = Gravity.CENTER
         sp.topMargin = 120
         root.addView(status, sp)
+
+        val crash = runCatching { getFileStreamPath("crash.txt").takeIf { it.exists() }?.readText() }.getOrNull()
+        if (crash != null) {
+            status.text = "PICHLI CRASH REPORT:\n${crash.take(600)}"
+        } else {
+            status.text = "Party load ho rahi hai..."
+        }
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
@@ -86,7 +99,7 @@ class MainActivity : Activity() {
         web.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                 bar.visibility = View.GONE
-                status.visibility = View.GONE
+                if (crash == null) status.visibility = View.GONE
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
@@ -125,18 +138,6 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
-        // The overlay permission is what makes true background playback possible.
-        if (!Settings.canDrawOverlays(this)) {
-            runCatching {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-            }
-        }
-
         try {
             MusicService.start(this)
         } catch (t: Throwable) {
@@ -146,47 +147,24 @@ class MainActivity : Activity() {
         web.loadUrl(url)
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (inOverlay) {
-            runCatching { wm.removeView(web) }
-            inOverlay = false
-            if (web.parent == null) root.addView(web, 0, FrameLayout.LayoutParams(-1, -1))
-        }
-        web.onResume()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        // Chromium idles hidden WebViews; an overlay window keeps this one "visible" forever.
-        if (Settings.canDrawOverlays(this) && !inOverlay) {
-            (web.parent as? ViewGroup)?.removeView(web)
-            try {
-                wm.addView(web, overlayParams())
-                inOverlay = true
-            } catch (t: Throwable) {
-                Log.e("MusicParty", "overlay failed", t)
-                if (web.parent == null) root.addView(web, 0, FrameLayout.LayoutParams(-1, -1))
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Home button: shrink into PiP so the WebView stays visible and the party keeps playing.
+        if (Build.VERSION.SDK_INT >= 26 && customView == null) {
+            runCatching {
+                enterPictureInPictureMode(
+                    PictureInPictureParams.Builder().build()
+                )
             }
         }
-        web.onResume()
-        web.resumeTimers()
     }
 
-    private fun overlayParams(): WindowManager.LayoutParams {
-        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-        return WindowManager.LayoutParams(
-            1, 1, type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            alpha = 0.01f
-        }
+    override fun onResume() {
+        super.onResume()
+        web.onResume()
     }
+
+    // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
 
     @Deprecated("Handled below")
     override fun onBackPressed() {
