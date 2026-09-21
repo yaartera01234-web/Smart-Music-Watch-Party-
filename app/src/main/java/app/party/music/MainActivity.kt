@@ -231,20 +231,3 @@ class MainActivity : Activity() {
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }
 }
-     super.onStop()
-        lastBg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
-        web.onResume()
-        web.resumeTimers()
-    }
-
-    // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
-
-    @Deprecated("Handled below")
-    override fun onBackPressed() {
-        if (customView != null) {
-            customViewCallback?.onCustomViewHidden()
-            return
-        }
-        if (web.canGoBack()) web.goBack() else super.onBackPressed()
-    }
-}
