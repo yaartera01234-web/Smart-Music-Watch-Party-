@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -33,7 +34,7 @@ import java.util.Date
  * service + wake lock additionally keep the process and CPU alive.
  *
  * A global crash handler writes any fatal error to crash.txt; on the next launch the trace is
- * shown on screen so it can be photographed and diagnosed without logcat.
+ * shown briefly (8s) so it can be photographed, then cleared.
  */
 class MainActivity : Activity() {
 
@@ -44,9 +45,6 @@ class MainActivity : Activity() {
     private lateinit var pipCover: TextView
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-    private var pipState = "-"
-    private var lastBg = "-"
-    private var lastFg = "-"
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -54,8 +52,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Self-reporting crashes: write trace to a file, show it next launch.
-        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+        // Self-reporting crashes: write trace to a file, show it briefly next launch.
+        Thread.setDefaultUncaughtExceptionHandler { _, error ->
             runCatching {
                 val sw = StringWriter()
                 error.printStackTrace(PrintWriter(sw))
@@ -84,18 +82,29 @@ class MainActivity : Activity() {
         sp.topMargin = 120
         root.addView(status, sp)
 
+        // Dark music bubble shown only inside PiP (the page's own UI reads like a video call).
+        pipCover = TextView(this)
+        pipCover.setBackgroundColor(Color.parseColor("#12081f"))
+        pipCover.setTextColor(Color.parseColor("#ff5fa2"))
+        pipCover.textSize = 22f
+        pipCover.gravity = Gravity.CENTER
+        pipCover.text = "♪ Party ON"
+        pipCover.visibility = View.GONE
+        root.addView(pipCover, FrameLayout.LayoutParams(-1, -1))
+
+        setContentView(root, FrameLayout.LayoutParams(-1, -1))
+
         val crash = runCatching { getFileStreamPath("crash.txt").takeIf { it.exists() }?.readText() }.getOrNull()
         if (crash != null) {
-            status.text = "PICHLI CRASH REPORT:\n${crash.take(600)}"
+            status.text = "CRASH REPORT (screenshot le lein):\n${crash.take(500)}"
+            getFileStreamPath("crash.txt").delete()
+            status.postDelayed({ status.visibility = View.GONE }, 8000)
         } else {
             status.text = "Party load ho rahi hai..."
         }
 
-        setContentView(root, FrameLayout.LayoutParams(-1, -1))
-
-        // YouTube flags bare WebViews as bots ("sign in to confirm"). Present a real Chrome
-        // identity plus full cookie support so the iframe player behaves like a normal browser.
-        val cookieManager = android.webkit.CookieManager.getInstance()
+        // Full cookie support so logged-in sessions and the iframe player behave normally.
+        val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
         cookieManager.setAcceptThirdPartyCookies(web, true)
 
@@ -105,20 +114,36 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             javaScriptCanOpenWindowsAutomatically = true
             cacheMode = WebSettings.LOAD_DEFAULT
-            // Desktop Chrome identity: YouTube's bot/sign-in checks fire far less on it.
-            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            // Plain mobile Chrome identity (no "wv" WebView marker).
+            userAgentString = "Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
         }
         web.webViewClient = object : WebViewClient() {
+            // YouTube's bot check hits youtube.com embeds hard inside apps; the privacy-friendly
+            // youtube-nocookie domain plays without the sign-in wall.
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val u = request?.url?.toString() ?: return false
+                if (u.contains("youtube.com/embed") || u.contains("youtube-nocookie.com/embed")) {
+                    val fixed = u
+                        .replace("www.youtube.com/embed", "www.youtube-nocookie.com/embed")
+                        .replace("youtube.com/embed", "youtube-nocookie.com/embed")
+                    if (fixed != u) {
+                        view?.loadUrl(fixed)
+                        return true
+                    }
+                }
+                return false
+            }
+
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                 bar.visibility = View.GONE
-                if (crash == null) status.visibility = View.GONE
+                status.postDelayed({ status.visibility = View.GONE }, if (crash != null) 8000 else 0)
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 if (request?.isForMainFrame == true) {
                     bar.visibility = View.GONE
-                    status.text = "Page load nahi hui — internet check karein.\n(${error?.description})"
+                    status.text = "Page load nahi hui — internet check karein."
                 }
             }
         }
@@ -164,33 +189,30 @@ class MainActivity : Activity() {
         super.onUserLeaveHint()
         // Home button: shrink into PiP so the WebView stays visible and the party keeps playing.
         if (Build.VERSION.SDK_INT >= 26 && customView == null) {
-            val ok = runCatching {
+            runCatching {
                 enterPictureInPictureMode(
                     PictureInPictureParams.Builder()
                         .setAspectRatio(android.util.Rational(1, 1))
                         .build()
                 )
-            }.getOrDefault(false)
-            pipState = if (ok) "ok" else "FAIL"
-        } else {
-            pipState = "skip"
+            }
         }
     }
 
     override fun onPictureInPictureModeChanged(isInPip: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPip, newConfig)
-        pipCover.visibility = if (isInPip) View.VISIBLE else View.GONE
+        if (::pipCover.isInitialized) {
+            pipCover.visibility = if (isInPip) View.VISIBLE else View.GONE
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        lastFg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
         web.onResume()
     }
 
     override fun onStop() {
         super.onStop()
-        lastBg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
         web.onResume()
         web.resumeTimers()
     }
