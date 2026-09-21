@@ -10,7 +10,7 @@
 
     <application
         android:label="Music Watch Party"
-        android:icon="@drawable/app_icon"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true">
 

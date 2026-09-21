@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Full-bleed art as the background layer so the launcher shows the big logo, not a shrunken badge. -->
+    <background android:drawable="@drawable/app_icon" />
+</adaptive-icon>

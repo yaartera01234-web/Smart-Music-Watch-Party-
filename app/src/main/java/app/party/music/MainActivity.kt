@@ -41,14 +41,12 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var bar: ProgressBar
-    private lateinit var dbg: TextView
     private lateinit var pipCover: TextView
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var pipState = "-"
     private var lastBg = "-"
     private var lastFg = "-"
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -94,28 +92,6 @@ class MainActivity : Activity() {
         }
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
-
-        // X-ray overlay: one screenshot of this line tells us exactly what is alive.
-        dbg = TextView(this)
-        dbg.setTextColor(Color.YELLOW)
-        dbg.textSize = 10f
-        val dp = FrameLayout.LayoutParams(-2, -2)
-        dp.gravity = Gravity.TOP or Gravity.START
-        dp.topMargin = 8
-        dp.leftMargin = 8
-        root.addView(dbg, dp)
-        handler.post(object : Runnable {
-            override fun run() {
-                val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
-                @Suppress("DEPRECATION")
-                val music = am.isMusicActive
-                dbg.text = "SVC=${if (MusicService.running) "ON" else "OFF"} " +
-                    "WL=${if (MusicService.wakeHeld) "ON" else "OFF"} " +
-                    "PIP=$pipState MUS=${if (music) "YES" else "no"} " +
-                    "BG=$lastBg FG=$lastFg"
-                handler.postDelayed(this, 2000)
-            }
-        })
 
         // YouTube flags bare WebViews as bots ("sign in to confirm"). Present a real Chrome
         // identity plus full cookie support so the iframe player behaves like a normal browser.
@@ -204,7 +180,6 @@ class MainActivity : Activity() {
     override fun onPictureInPictureModeChanged(isInPip: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPip, newConfig)
         pipCover.visibility = if (isInPip) View.VISIBLE else View.GONE
-        dbg.visibility = if (isInPip) View.GONE else View.VISIBLE
     }
 
     override fun onResume() {

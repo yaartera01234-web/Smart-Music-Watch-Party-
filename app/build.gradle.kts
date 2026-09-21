@@ -19,6 +19,16 @@ android {
         release {
             isMinifyEnabled = false
         }
+        // Stable signing: CI debug builds must share one key, otherwise every new APK refuses
+        // to install over the previous one (signature mismatch).
+        debug {
+            signingConfig = signingConfigs.create("party") {
+                storeFile = file("${rootDir}/keystore/party.jks")
+                storePassword = "party123"
+                keyAlias = "party"
+                keyPassword = "party123"
+            }
+        }
     }
 
     compileOptions {
