@@ -99,7 +99,7 @@ class MainActivity : Activity() {
         splash.addView(loading)
         loading.alpha = 0.4f
         loading.animate().setDuration(900).alpha(1f).setInterpolator(
-            android.animation.AccelerateDecelerateInterpolator()
+            android.view.animation.AccelerateDecelerateInterpolator()
         ).withEndAction {
             loading.animate().setDuration(900).alpha(0.4f).withEndAction { pulse(loading) }
         }.start()
