@@ -114,27 +114,12 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             javaScriptCanOpenWindowsAutomatically = true
             cacheMode = WebSettings.LOAD_DEFAULT
-            // Plain mobile Chrome identity (no "wv" WebView marker).
-            userAgentString = "Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+            // Desktop Chrome identity — the exact combo that tested working (v10): YouTube played
+            // without the sign-in wall on it.
+            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         }
         web.webViewClient = object : WebViewClient() {
-            // YouTube's bot check hits youtube.com embeds hard inside apps; the privacy-friendly
-            // youtube-nocookie domain plays without the sign-in wall.
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val u = request?.url?.toString() ?: return false
-                if (u.contains("youtube.com/embed") || u.contains("youtube-nocookie.com/embed")) {
-                    val fixed = u
-                        .replace("www.youtube.com/embed", "www.youtube-nocookie.com/embed")
-                        .replace("youtube.com/embed", "youtube-nocookie.com/embed")
-                    if (fixed != u) {
-                        view?.loadUrl(fixed)
-                        return true
-                    }
-                }
-                return false
-            }
-
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                 bar.visibility = View.GONE
                 status.postDelayed({ status.visibility = View.GONE }, if (crash != null) 8000 else 0)
