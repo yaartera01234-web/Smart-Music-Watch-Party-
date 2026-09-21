@@ -42,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var bar: ProgressBar
     private lateinit var dbg: TextView
+    private lateinit var pipCover: TextView
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var pipState = "-"
@@ -188,12 +189,22 @@ class MainActivity : Activity() {
         // Home button: shrink into PiP so the WebView stays visible and the party keeps playing.
         if (Build.VERSION.SDK_INT >= 26 && customView == null) {
             val ok = runCatching {
-                enterPictureInPictureMode(PictureInPictureParams.Builder().build())
+                enterPictureInPictureMode(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(android.util.Rational(1, 1))
+                        .build()
+                )
             }.getOrDefault(false)
             pipState = if (ok) "ok" else "FAIL"
         } else {
             pipState = "skip"
         }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPip: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPip, newConfig)
+        pipCover.visibility = if (isInPip) View.VISIBLE else View.GONE
+        dbg.visibility = if (isInPip) View.GONE else View.VISIBLE
     }
 
     override fun onResume() {
@@ -204,6 +215,23 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        lastBg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
+        web.onResume()
+        web.resumeTimers()
+    }
+
+    // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
+
+    @Deprecated("Handled below")
+    override fun onBackPressed() {
+        if (customView != null) {
+            customViewCallback?.onCustomViewHidden()
+            return
+        }
+        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+    }
+}
+     super.onStop()
         lastBg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
         web.onResume()
         web.resumeTimers()
