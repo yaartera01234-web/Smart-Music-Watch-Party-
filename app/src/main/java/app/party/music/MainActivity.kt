@@ -41,8 +41,13 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var bar: ProgressBar
+    private lateinit var dbg: TextView
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var pipState = "-"
+    private var lastBg = "-"
+    private var lastFg = "-"
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -89,6 +94,28 @@ class MainActivity : Activity() {
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
+        // X-ray overlay: one screenshot of this line tells us exactly what is alive.
+        dbg = TextView(this)
+        dbg.setTextColor(Color.YELLOW)
+        dbg.textSize = 10f
+        val dp = FrameLayout.LayoutParams(-2, -2)
+        dp.gravity = Gravity.TOP or Gravity.START
+        dp.topMargin = 8
+        dp.leftMargin = 8
+        root.addView(dbg, dp)
+        handler.post(object : Runnable {
+            override fun run() {
+                val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+                @Suppress("DEPRECATION")
+                val music = am.isMusicActive
+                dbg.text = "SVC=${if (MusicService.running) "ON" else "OFF"} " +
+                    "WL=${if (MusicService.wakeHeld) "ON" else "OFF"} " +
+                    "PIP=$pipState MUS=${if (music) "YES" else "no"} " +
+                    "BG=$lastBg FG=$lastFg"
+                handler.postDelayed(this, 2000)
+            }
+        })
+
         // YouTube flags bare WebViews as bots ("sign in to confirm"). Present a real Chrome
         // identity plus full cookie support so the iframe player behaves like a normal browser.
         val cookieManager = android.webkit.CookieManager.getInstance()
@@ -101,8 +128,9 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             javaScriptCanOpenWindowsAutomatically = true
             cacheMode = WebSettings.LOAD_DEFAULT
-            userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+            // Desktop Chrome identity: YouTube's bot/sign-in checks fire far less on it.
+            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         }
         web.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
@@ -159,17 +187,26 @@ class MainActivity : Activity() {
         super.onUserLeaveHint()
         // Home button: shrink into PiP so the WebView stays visible and the party keeps playing.
         if (Build.VERSION.SDK_INT >= 26 && customView == null) {
-            runCatching {
-                enterPictureInPictureMode(
-                    PictureInPictureParams.Builder().build()
-                )
-            }
+            val ok = runCatching {
+                enterPictureInPictureMode(PictureInPictureParams.Builder().build())
+            }.getOrDefault(false)
+            pipState = if (ok) "ok" else "FAIL"
+        } else {
+            pipState = "skip"
         }
     }
 
     override fun onResume() {
         super.onResume()
+        lastFg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
         web.onResume()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        lastBg = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
+        web.onResume()
+        web.resumeTimers()
     }
 
     // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.

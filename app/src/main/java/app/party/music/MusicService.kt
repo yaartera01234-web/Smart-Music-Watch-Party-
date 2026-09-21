@@ -32,10 +32,11 @@ class MusicService : Service() {
     private var focusRequest: AudioFocusRequest? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        running = true
         if (wakeLock == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "musicparty:audio")
-                .apply { acquire() }
+                .apply { acquire(); wakeHeld = true }
         }
 
         takeAudioFocus()
@@ -113,6 +114,8 @@ class MusicService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
+        wakeHeld = false
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null
         session?.release()
@@ -126,6 +129,9 @@ class MusicService : Service() {
     }
 
     companion object {
+        @Volatile var running = false
+        @Volatile var wakeHeld = false
+
         fun start(context: Context) {
             val i = Intent(context, MusicService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
