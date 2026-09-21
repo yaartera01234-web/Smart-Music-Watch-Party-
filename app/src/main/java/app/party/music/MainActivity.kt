@@ -20,11 +20,13 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceResponse
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import java.io.ByteArrayInputStream
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.util.Date
@@ -53,6 +55,15 @@ class MainActivity : Activity() {
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
+
+    private val AD_HOSTS = listOf(
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "/pagead",
+        "imasdk.googleapis.com",
+        "googleads.g."
+    )
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
