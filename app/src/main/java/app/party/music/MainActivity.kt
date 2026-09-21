@@ -47,6 +47,7 @@ class MainActivity : Activity() {
     private lateinit var splash: LinearLayout
     private lateinit var status: TextView
     private lateinit var pipCover: TextView
+    private lateinit var banner: TextView
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
@@ -125,6 +126,22 @@ class MainActivity : Activity() {
         pipCover.visibility = View.GONE
         root.addView(pipCover, FrameLayout.LayoutParams(-1, -1))
 
+        // Branded replacement for the page's raw JS alerts (connection notices etc.).
+        banner = TextView(this)
+        banner.setTextColor(Color.WHITE)
+        banner.textSize = 13f
+        banner.setPadding(dp(18), dp(12), dp(18), dp(12))
+        val bg = android.graphics.drawable.GradientDrawable()
+        bg.setColor(Color.parseColor("#e612081f"))
+        bg.setStroke(dp(1), Color.parseColor("#ff5fa2"))
+        bg.cornerRadius = dp(14).toFloat()
+        banner.background = bg
+        banner.visibility = View.GONE
+        val bnp = FrameLayout.LayoutParams(-2, -2)
+        bnp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        bnp.bottomMargin = dp(34)
+        root.addView(banner, bnp)
+
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
         val crash = runCatching { getFileStreamPath("crash.txt").takeIf { it.exists() }?.readText() }.getOrNull()
@@ -181,6 +198,13 @@ class MainActivity : Activity() {
                 web.visibility = View.VISIBLE
             }
 
+            // The page's raw JS alert() (e.g. "tower se jur raha hai") becomes a branded banner.
+            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult): Boolean {
+                showBanner(message ?: "")
+                result.confirm()
+                return true
+            }
+
             // The page's Photo/DP button: open the system picker and hand the choice back.
             override fun onShowFileChooser(
                 webView: WebView?,
@@ -220,6 +244,16 @@ class MainActivity : Activity() {
         web.loadUrl(url)
     }
 
+    private fun showBanner(message: String) {
+        if (!::banner.isInitialized) return
+        banner.removeCallbacks(hideBanner)
+        banner.text = message
+        banner.visibility = View.VISIBLE
+        banner.postDelayed(hideBanner, 2600)
+    }
+
+    private val hideBanner = Runnable { banner.visibility = View.GONE }
+
     private fun pulse(v: View) {
         v.animate().setDuration(900).alpha(1f).withEndAction {
             v.animate().setDuration(900).alpha(0.4f).withEndAction { pulse(v) }
@@ -256,6 +290,7 @@ class MainActivity : Activity() {
         super.onPictureInPictureModeChanged(isInPip, newConfig)
         if (::pipCover.isInitialized) {
             pipCover.visibility = if (isInPip) View.VISIBLE else View.GONE
+            if (isInPip) banner.visibility = View.GONE
         }
     }
 
