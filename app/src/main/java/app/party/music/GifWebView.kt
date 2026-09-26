@@ -44,7 +44,8 @@ class GifWebView(context: Context) : WebView(context) {
                 }
             }
             val uri: Uri = info.contentUri
-            val mime = info.description?.mimeType ?: "image/gif"
+            val desc = info.description
+            val mime = if (desc != null && desc.mimeTypeCount > 0) desc.getMimeType(0) else "image/gif"
             thread { handle(uri, mime) }
             true
         }
@@ -52,7 +53,7 @@ class GifWebView(context: Context) : WebView(context) {
 
     private fun handle(uri: Uri, mime: String) {
         try {
-            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             if (bytes == null || bytes.isEmpty()) {
                 post { onGifError?.invoke("GIF khali tha") }
                 return
