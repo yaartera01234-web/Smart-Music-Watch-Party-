@@ -180,6 +180,22 @@ class MainActivity : Activity() {
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         }
         web.webViewClient = object : WebViewClient() {
+            // v20 me AD_HOSTS list bani thi magar use kabhi nahi hui — yahan asal blocking.
+            // Sirf sub-resources block hote hain (main page kabhi nahi). YouTube ke andar wale
+            // ads ka kuch hissa isse skip ho jata hai; video/ads dono ke apne googlevideo.com
+            // domain ko chhua nahi jata (warna playback hi ruk jati).
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val r = request ?: return null
+                if (r.isForMainFrame) return null
+                val host = r.url.host ?: ""
+                val full = r.url.toString()
+                val blocked = AD_HOSTS.any { h ->
+                    if (h.startsWith("/")) full.contains(h) else host.contains(h)
+                }
+                if (!blocked) return null
+                return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+            }
+
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                 splash.visibility = View.GONE
             }
