@@ -45,7 +45,7 @@ import java.util.Date
 class MainActivity : Activity() {
 
     private lateinit var root: FrameLayout
-    private lateinit var web: WebView
+    private lateinit var web: GifWebView
     private lateinit var splash: LinearLayout
     private lateinit var status: TextView
     private lateinit var pipCover: TextView
@@ -82,7 +82,7 @@ class MainActivity : Activity() {
         root = FrameLayout(this)
         root.setBackgroundColor(Color.parseColor("#0d0716"))
 
-        web = WebView(this)
+        web = GifWebView(this)
         web.setBackgroundColor(Color.parseColor("#0d0716"))
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
 
@@ -251,6 +251,13 @@ class MainActivity : Activity() {
         } catch (t: Throwable) {
             Log.e("MusicParty", "service start failed", t)
         }
+
+        // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
+        web.onGif = { gifUrl ->
+            val safe = gifUrl.replace("\\", "").replace("'", "\\'")
+            web.post { web.evaluateJavascript("window.wpSendGif && window.wpSendGif('" + safe + "')", null) }
+        }
+        web.onGifError = { msg -> showBanner(msg) }
 
         web.loadUrl(url)
     }
