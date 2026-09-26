@@ -62,7 +62,9 @@ class MainActivity : Activity() {
         "googleadservices.com",
         "/pagead",
         "imasdk.googleapis.com",
-        "googleads.g."
+        "googleads.g.",
+        "googletagservices.com",
+        "adservice.google.com"
     )
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -275,7 +277,10 @@ class MainActivity : Activity() {
         }
         web.onGifError = { msg -> showBanner(msg) }
 
-        web.loadUrl(url)
+        // GitHub Pages HTML ko ~10 min cache karta hai + WebView bhi cache karta hai.
+        // Har launch pe naya query lagane se page TAZA aata hai, warna naye fixes app me
+        // dikhte hi nahi (assets/libs cache me rehte hain, sirf ~100KB page dobara aata hai).
+        web.loadUrl(url + "?v=" + System.currentTimeMillis())
     }
 
     private fun showBanner(message: String) {
