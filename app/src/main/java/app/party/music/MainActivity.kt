@@ -192,7 +192,11 @@ class MainActivity : Activity() {
         /* v34: ⛶ ko 2 second DABAYE RAHO = native player ka self-test
            (public sample mp4 — agar ye chala to native theek hai, masla link ka hai) */
         nb.setOnLongClickListener {
-            openNative("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "Native Test")
+            openNative(
+                "https://raw.githubusercontent.com/mediaelement/mediaelement-files/master/big_buck_bunny.mp4",
+                "Native Test",
+                "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
+            )
             true
         }
         nBtn = nb
@@ -358,7 +362,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 34
+            fun appVersion(): Int = 35
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -517,7 +521,7 @@ class MainActivity : Activity() {
         } catch (t: Throwable) {}
     }
 
-    private fun openNative(url: String, title: String?) {
+    private fun openNative(url: String, title: String?, alt: String? = null) {
         if (url.isBlank()) return
         pausePagePlayer()
         runOnUiThread {
@@ -525,6 +529,7 @@ class MainActivity : Activity() {
                 startActivity(Intent(this, PlayerActivity::class.java).apply {
                     putExtra("url", url)
                     putExtra("title", title ?: "Video")
+                    if (!alt.isNullOrBlank()) putExtra("alt", alt)
                 })
             } catch (t: Throwable) { showBanner("\u26a0\ufe0f Native player nahi khula") }
         }
