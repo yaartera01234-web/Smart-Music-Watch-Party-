@@ -2,8 +2,13 @@ package app.party.music
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Activity
 import android.app.PictureInPictureParams
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -55,6 +60,7 @@ class MainActivity : Activity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
     private var pendingWebPerm: PermissionRequest? = null
+    private var resumed = false
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -304,8 +310,12 @@ class MainActivity : Activity() {
                 }
             }
 
+            /* v26: DM notification — page se aati hai, sirf jab app saamne na ho */
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 25
+            fun notify(title: String?, text: String?) { postNote(title, text) }
+
+            @android.webkit.JavascriptInterface
+            fun appVersion(): Int = 26
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -388,7 +398,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         web.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        resumed = false
     }
 
     override fun onStop() {
@@ -398,6 +414,38 @@ class MainActivity : Activity() {
     }
 
     // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
+
+    /* ---------------- v26: DM notifications ---------------- */
+
+    private fun postNote(title: String?, text: String?) {
+        if (resumed) return            // app saamne hai -> toast/page khud dikha dega
+        runOnUiThread {
+            try {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (Build.VERSION.SDK_INT >= 26) {
+                    val ch = NotificationChannel("dm", "Messages", NotificationManager.IMPORTANCE_HIGH)
+                    ch.enableVibration(true)
+                    nm.createNotificationChannel(ch)
+                }
+                val pi = PendingIntent.getActivity(
+                    this, 0,
+                    Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+                    if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0
+                )
+                val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "dm") else Notification.Builder(this)
+                b.setSmallIcon(R.drawable.app_icon)
+                    .setContentTitle(title ?: "💬 Messages")
+                    .setContentText(text ?: "Naya message aaya hai")
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
+                if (Build.VERSION.SDK_INT >= 26) b.setChannelId("dm")
+                nm.notify((System.currentTimeMillis() % 100000).toInt(), b.build())
+            } catch (t: Throwable) {
+                Log.e("MusicParty", "notify fail", t)
+            }
+        }
+    }
 
     @Deprecated("Handled below")
     override fun onBackPressed() {
