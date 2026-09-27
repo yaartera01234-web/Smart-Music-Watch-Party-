@@ -128,7 +128,7 @@ class BgNotifyService : Service() {
         fun bgPing() { lastPing = System.currentTimeMillis() }
 
         @android.webkit.JavascriptInterface
-        fun appVersion(): Int = 35
+        fun appVersion(): Int = 36
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
