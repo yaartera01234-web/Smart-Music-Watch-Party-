@@ -84,6 +84,16 @@ object NotifHub {
         }
     }
 
+    /** v39: user ne note swipe kar diya -> chhupi service ko batao (dobara note na aaye). */
+    private fun dismissIntent(ctx: Context): PendingIntent {
+        val i = Intent(ctx, BgNotifyService::class.java).setAction(BgNotifyService.NOTE_GONE)
+        return PendingIntent.getService(
+            ctx, 7, i,
+            if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            else PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
     /** Background service ka chalta-hua (silent) notification. */
     fun serviceNote(ctx: Context): Notification {
         ensureChannels(ctx)
@@ -91,7 +101,11 @@ object NotifHub {
         b.setSmallIcon(R.drawable.app_icon)
             .setContentTitle("\uD83D\uDCAC Messages on")
             .setContentText("Naya message aane pe notification aayegi")
-            .setOngoing(true)
+            /* v39: chipka hua note user ko tang kar raha tha -> ab swipe karke hata sakte hain.
+               Swipe hone pe service ko pata chal jata hai aur dobara note nahi aata. */
+            .setOngoing(false)
+            .setAutoCancel(false)
+            .setDeleteIntent(dismissIntent(ctx))
             .setShowWhen(false)
             .setContentIntent(openApp(ctx))
         if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))

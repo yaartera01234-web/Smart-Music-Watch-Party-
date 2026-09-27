@@ -335,7 +335,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 38
+            fun appVersion(): Int = 39
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -440,7 +440,9 @@ class MainActivity : Activity() {
         super.onStart()
         /* app saamne aa gaya -> background wisper band karo (warna double kaam) */
         try { bgHandler.removeCallbacks(bgStarter) } catch (t: Throwable) {}
-        BgNotifyService.stop(this)
+        /* v39: agar user ne "Messages on" note swipe kar diya hai to service chalti rahe
+           (band karne se agli dafa dobara note post hota hai). */
+        if (!BgNotifyService.noteMuted) BgNotifyService.stop(this)
     }
 
     override fun onResume() {
@@ -464,7 +466,8 @@ class MainActivity : Activity() {
         if (!isChangingConfigurations) {
             try {
                 bgHandler.removeCallbacks(bgStarter)
-                bgHandler.postDelayed(bgStarter, 2500)
+                /* v39: 2.5s -> 30s: sirf chhoti chhoot (picker/switch) me note nazar na aaye */
+                bgHandler.postDelayed(bgStarter, 30000)
             } catch (t: Throwable) {}
         }
     }

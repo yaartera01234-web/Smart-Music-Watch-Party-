@@ -31,13 +31,24 @@ class BgNotifyService : Service() {
     companion object {
         private const val TAG = "MusicParty"
         private const val NOTE_ID = 4242
+        const val NOTE_GONE = "app.party.music.NOTE_GONE"
         private const val URL = "https://yaartera01234-web.github.io/watch-party/party-final1.html?bg=1"
 
         @Volatile var running = false
 
+        /* v39: user ne "Messages on" note swipe kar diya -> usay dobara pareshan na karo */
+        @Volatile var noteMuted = false
+
+        fun prefs(ctx: Context) = ctx.getSharedPreferences("ypbg", Context.MODE_PRIVATE)
+
         fun start(ctx: Context) {
+            val i = Intent(ctx, BgNotifyService::class.java)
+            /* service pehle se chal rahi hai (note muted) -> startService hi kaafi hai.
+               startForegroundService karne pe Android naya note dikhane pe majboor karta hai. */
+            if (running) {
+                try { ctx.startService(i); return } catch (t: Throwable) {}
+            }
             try {
-                val i = Intent(ctx, BgNotifyService::class.java)
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
             } catch (t: Throwable) {
                 Log.e(TAG, "bg start fail", t)
@@ -52,6 +63,7 @@ class BgNotifyService : Service() {
     private var web: WebView? = null
     private var startedAt = 0L
     private var lastPing = 0L
+    private var notePosted = false          /* v39: ek hi dafa note post karo */
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchdog = object : Runnable {
@@ -73,10 +85,21 @@ class BgNotifyService : Service() {
         running = true
         startedAt = System.currentTimeMillis()
         lastPing = startedAt
+        noteMuted = try { prefs(this).getBoolean("noteMuted", false) } catch (t: Throwable) { false }
         try {
             startForeground(NOTE_ID, NotifHub.serviceNote(this))
+            notePosted = true
         } catch (t: Throwable) {
             Log.e(TAG, "foreground fail", t)
+        }
+        /* v39: user ne pehle note hata diya tha -> chup-chaap dobara ghayab kar do */
+        if (noteMuted) {
+            handler.postDelayed({
+                try {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.cancel(NOTE_ID)
+                } catch (t: Throwable) {}
+            }, 600)
         }
         try {
             val w = WebView(this)
@@ -128,11 +151,19 @@ class BgNotifyService : Service() {
         fun bgPing() { lastPing = System.currentTimeMillis() }
 
         @android.webkit.JavascriptInterface
-        fun appVersion(): Int = 38
+        fun appVersion(): Int = 39
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        try { startForeground(NOTE_ID, NotifHub.serviceNote(this)) } catch (t: Throwable) {}
+        /* v39: user ne note swipe kar diya -> yaad rakho, dobara note nahi */
+        if (intent != null && NOTE_GONE == intent.action) {
+            noteMuted = true
+            try { prefs(this).edit().putBoolean("noteMuted", true).apply() } catch (t: Throwable) {}
+            return START_STICKY
+        }
+        if (!notePosted) {
+            try { startForeground(NOTE_ID, NotifHub.serviceNote(this)); notePosted = true } catch (t: Throwable) {}
+        }
         return START_STICKY
     }
 
