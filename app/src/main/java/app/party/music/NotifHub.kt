@@ -92,7 +92,6 @@ object NotifHub {
             .setContentTitle("\uD83D\uDCAC Messages on")
             .setContentText("Naya message aane pe notification aayegi")
             .setOngoing(true)
-            .setSilent(true)
             .setShowWhen(false)
             .setContentIntent(openApp(ctx))
         if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
