@@ -346,7 +346,7 @@ class MainActivity : Activity() {
             }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 40
+            fun appVersion(): Int = 41
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
