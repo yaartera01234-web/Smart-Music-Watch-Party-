@@ -25,6 +25,8 @@ import android.webkit.WebViewClient
  *
  * Page (`?bg=1`) 60 second me ek dafa bgPing() bhejta hai. 5 minute tak koi ping
  * na aaye to WebView reload ho jata hai (self-heal).
+ *
+ * v41: note (notification) ab foran chhup jata hai — kaam wahi, tang karna khatam.
  */
 class BgNotifyService : Service() {
 
@@ -92,15 +94,13 @@ class BgNotifyService : Service() {
         } catch (t: Throwable) {
             Log.e(TAG, "foreground fail", t)
         }
-        /* v39: user ne pehle note hata diya tha -> chup-chaap dobara ghayab kar do */
-        if (noteMuted) {
-            handler.postDelayed({
-                try {
-                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-                    nm.cancel(NOTE_ID)
-                } catch (t: Throwable) {}
-            }, 600)
-        }
+        /* v41: "Messages on" note user ko tang kar raha tha. Android 13+ pe foreground
+           service chalti rehti hai (messages aate rehte hain) magar note chup-chaap
+           hat jata hai — user ko shade me kuch chipka hua nazar nahi aata.
+           (Purane Android pe system cancel karne hi nahi deta — wahan note rehta hai,
+           user swipe kar sakta hai aur phir dobara nahi aata.) */
+        handler.postDelayed({ hideNote() }, if (noteMuted) 400L else 1300L)
+        handler.postDelayed({ hideNote() }, 2800L)
         try {
             val w = WebView(this)
             val st: WebSettings = w.settings
@@ -163,7 +163,15 @@ class BgNotifyService : Service() {
         fun bgPing() { lastPing = System.currentTimeMillis() }
 
         @android.webkit.JavascriptInterface
-        fun appVersion(): Int = 40
+        fun appVersion(): Int = 41
+    }
+
+    /** v41: FGS note ghayab karo (service foreground hi rehti hai). */
+    private fun hideNote() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.cancel(NOTE_ID)
+        } catch (t: Throwable) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
