@@ -301,7 +301,7 @@ class PlayerActivity : Activity() {
                         setStatus("v34 \u2022 controller \u2022 state " + state)
                     }
                     override fun onPlayerError(error: PlaybackException) {
-                        showPlayErr(error.errorCode + " " + error.errorCodeName)
+                        showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
                     }
                 })
             } catch (t: Throwable) {
@@ -368,7 +368,7 @@ class PlayerActivity : Activity() {
                 setStatus("v34 \u2022 local \u2022 state " + state)
             }
             override fun onPlayerError(error: PlaybackException) {
-                showPlayErr(error.errorCode + " " + error.errorCodeName)
+                showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
             }
         })
     }
