@@ -352,7 +352,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 32
+            fun appVersion(): Int = 33
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -392,7 +392,8 @@ class MainActivity : Activity() {
             if (txt.isBlank() || txt == lastCrashShown) return
             lastCrashShown = txt
             if (!::status.isInitialized) return
-            status.text = "\u26a0\ufe0f NATIVE PLAYER ERROR (tap = hatao):\n" + txt.take(1400)
+            val body = if (txt.length > 1700) txt.take(900) + "\n\u2026\n" + txt.takeLast(700) else txt
+            status.text = "\u26a0\ufe0f NATIVE PLAYER LOG (tap = hatao):\n" + body
             status.visibility = View.VISIBLE
             status.isClickable = true
             status.setOnClickListener {
