@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -92,7 +93,7 @@ class BgNotifyService : Service() {
             w.webChromeClient = object : WebChromeClient() {
                 override fun onJsAlert(v: WebView?, u: String?, msg: String?, r: JsResult): Boolean { r.cancel(); return true }
                 override fun onJsConfirm(v: WebView?, u: String?, msg: String?, r: JsResult): Boolean { r.cancel(); return true }
-                override fun onJsPrompt(v: WebView?, u: String?, msg: String?, d: String?, r: JsResult): Boolean { r.cancel(); return true }
+                override fun onJsPrompt(v: WebView?, u: String?, msg: String?, d: String?, r: JsPromptResult): Boolean { r.cancel(); return true }
             }
             w.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
