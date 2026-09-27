@@ -1,10 +1,16 @@
 package app.party.music
 
 import android.content.Intent
+import android.webkit.CookieManager
+import android.webkit.WebSettings
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -23,7 +29,27 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val p = ExoPlayer.Builder(this).build().apply {
+        /* v28: browser jaisa UA + WebView ke cookies + referer —
+           warna bohat se streams (jo referer/login check karte hain) native me 403 dete hain */
+        val ua = try { WebSettings.getDefaultUserAgent(this) } catch (t: Throwable) { "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36" }
+        val base = DefaultHttpDataSource.Factory()
+            .setUserAgent(ua)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(20000)
+            .setAllowCrossProtocolRedirects(true)
+        val withCookies = ResolvingDataSource.Factory(base) { spec ->
+            val u = spec.uri.toString()
+            val hdrs = HashMap<String, String>()
+            try {
+                val ck = CookieManager.getInstance().getCookie(u)
+                if (!ck.isNullOrBlank()) hdrs["Cookie"] = ck
+            } catch (t: Throwable) {}
+            hdrs["Referer"] = "https://yaartera01234-web.github.io/"
+            spec.withRequestHeaders(hdrs)
+        }
+        val dsFactory = DefaultDataSource.Factory(this, withCookies)
+        val msFactory = DefaultMediaSourceFactory(dsFactory)
+        val p = ExoPlayer.Builder(this).setMediaSourceFactory(msFactory).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
