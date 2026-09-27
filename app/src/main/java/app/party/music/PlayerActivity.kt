@@ -51,6 +51,7 @@ import kotlin.math.roundToInt
  * v32: HAR STEP apna try/catch — koi ek cheez fail ho to native phir bhi khule.
  *      + MediaController (background/notification) fail ho to LOCAL ExoPlayer fallback.
  *      + error poori screen pe (tap = hatao) aur crash.txt me (agle launch pe banner).
+ * v33: immersive() ab setContentView ke BAAD (wahi NPE tha jo app girata tha) + telemetry.
  *
  *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS
  *  - Right side pe ungli se UPAR/NEEche -> VOLUME
@@ -112,8 +113,6 @@ class PlayerActivity : Activity() {
     }
 
     private fun buildUi() {
-        step("immersive") { immersive() }
-
         step("audio") {
             am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             maxVol = am!!.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -214,6 +213,8 @@ class PlayerActivity : Activity() {
         }
 
         step("show") { setContentView(r) }
+        /* v33 FIX: fullscreen sirf content lagne ke BAAD (pehle decor view null hota hai -> NPE) */
+        step("immersive") { immersive() }
 
         val url = try { intent.getStringExtra("url") } catch (t: Throwable) { null }
         val title = try { intent.getStringExtra("title") } catch (t: Throwable) { null } ?: "Video"
@@ -224,7 +225,7 @@ class PlayerActivity : Activity() {
         val ok = step("session") { startController(url, title, pos) }
         if (!ok || !started) startLocalIfNeeded(url, title, pos)
 
-        if (!started && stepErrs.isNotEmpty()) showErrPanel()
+        if (stepErrs.isNotEmpty()) showErrPanel()
     }
 
     /* ================= player start ================= */
@@ -260,9 +261,12 @@ class PlayerActivity : Activity() {
                 c.setMediaItem(mediaItem(url, title), pos)
                 c.prepare()
                 c.play()
+                logLine("session OK \u2014 playing")
                 c.addListener(object : Player.Listener {
                     override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
+                    override fun onPlaybackStateChanged(state: Int) { logLine("state " + state) }
                     override fun onPlayerError(error: PlaybackException) {
+                        logLine("playerError " + error.errorCode + " " + error.errorCodeName + ": " + error.message)
                         showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
                         try {
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish() }, 2400)
@@ -324,9 +328,12 @@ class PlayerActivity : Activity() {
         p.setMediaItem(mediaItem(url, title), pos)
         p.prepare()
         p.play()
+        logLine("local OK \u2014 playing")
         p.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
+            override fun onPlaybackStateChanged(state: Int) { logLine("local state " + state) }
             override fun onPlayerError(error: PlaybackException) {
+                logLine("local playerError " + error.errorCode + " " + error.errorCodeName + ": " + error.message)
                 showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
                 try {
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish() }, 2400)
@@ -489,11 +496,27 @@ class PlayerActivity : Activity() {
 
     private fun immersive() {
         if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let {
-                it.hide(android.view.WindowInsets.Type.systemBars())
-                it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            try { window.setDecorFitsSystemWindows(false) } catch (t: Throwable) { fail("decorFits", t) }
+            /* v33: getWindowInsetsController() decor view na hone pe khud NPE deta hai -> poori tarah guard */
+            val ic = try { window.insetsController } catch (t: Throwable) { null }
+            if (ic != null) {
+                try {
+                    ic.hide(android.view.WindowInsets.Type.systemBars())
+                    ic.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    return
+                } catch (t: Throwable) { fail("hideBars", t) }
             }
+            try {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
+            } catch (t: Throwable) { fail("legacyBars", t) }
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = (
@@ -507,7 +530,19 @@ class PlayerActivity : Activity() {
         }
     }
 
-    /* ---------------- error reporting (v32) ---------------- */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) try { immersive() } catch (t: Throwable) {}
+    }
+
+    /* ---------------- error reporting (v32/v33) ---------------- */
+
+    private fun logLine(msg: String) {
+        try {
+            getFileStreamPath("crash.txt").appendText("\n[" + Date() + "] v33 " + msg + "\n")
+        } catch (e: Throwable) {}
+    }
+
 
     private fun step(name: String, block: () -> Unit): Boolean {
         return try {
@@ -549,6 +584,7 @@ class PlayerActivity : Activity() {
                     gravity = Gravity.TOP
                     topMargin = dp(64)
                 })
+                if (started) t.postDelayed({ try { t.visibility = View.GONE } catch (e: Throwable) {} }, 12000)
             } catch (e: Throwable) {}
         }
     }
