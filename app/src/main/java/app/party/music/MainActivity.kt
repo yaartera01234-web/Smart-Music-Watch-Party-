@@ -13,6 +13,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -61,6 +63,12 @@ class MainActivity : Activity() {
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
     private var pendingWebPerm: PermissionRequest? = null
     private var resumed = false
+
+    /* v27: app background/band hone pe DM notifications ke liye chhupa WebView service */
+    private val bgHandler = Handler(Looper.getMainLooper())
+    private val bgStarter = Runnable {
+        try { BgNotifyService.start(this) } catch (t: Throwable) { Log.e("MusicParty", "bg start fail", t) }
+    }
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -315,7 +323,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 26
+            fun appVersion(): Int = 27
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -396,6 +404,13 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        /* app saamne aa gaya -> background wisper band karo (warna double kaam) */
+        try { bgHandler.removeCallbacks(bgStarter) } catch (t: Throwable) {}
+        BgNotifyService.stop(this)
+    }
+
     override fun onResume() {
         super.onResume()
         resumed = true
@@ -411,6 +426,14 @@ class MainActivity : Activity() {
         super.onStop()
         web.onResume()
         web.resumeTimers()
+        /* v27: 2.5s baad bhi app peeche hai to background service chala do
+           (photo/GIF picker jaisi chhoti chhoot me service start nahi hoti) */
+        if (!isChangingConfigurations) {
+            try {
+                bgHandler.removeCallbacks(bgStarter)
+                bgHandler.postDelayed(bgStarter, 2500)
+            } catch (t: Throwable) {}
+        }
     }
 
     // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
@@ -419,32 +442,7 @@ class MainActivity : Activity() {
 
     private fun postNote(title: String?, text: String?) {
         if (resumed) return            // app saamne hai -> toast/page khud dikha dega
-        runOnUiThread {
-            try {
-                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                if (Build.VERSION.SDK_INT >= 26) {
-                    val ch = NotificationChannel("dm", "Messages", NotificationManager.IMPORTANCE_HIGH)
-                    ch.enableVibration(true)
-                    nm.createNotificationChannel(ch)
-                }
-                val pi = PendingIntent.getActivity(
-                    this, 0,
-                    Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
-                    if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0
-                )
-                val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "dm") else Notification.Builder(this)
-                b.setSmallIcon(R.drawable.app_icon)
-                    .setContentTitle(title ?: "💬 Messages")
-                    .setContentText(text ?: "Naya message aaya hai")
-                    .setAutoCancel(true)
-                    .setContentIntent(pi)
-                if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
-                if (Build.VERSION.SDK_INT >= 26) b.setChannelId("dm")
-                nm.notify((System.currentTimeMillis() % 100000).toInt(), b.build())
-            } catch (t: Throwable) {
-                Log.e("MusicParty", "notify fail", t)
-            }
-        }
+        NotifHub.post(this, title, text, "fg")
     }
 
     @Deprecated("Handled below")
