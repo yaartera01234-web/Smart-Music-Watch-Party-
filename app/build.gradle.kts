@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music"
         minSdk = 24
         targetSdk = 35
-        versionCode = 36
-        versionName = "36"
+        versionCode = 37
+        versionName = "37"
     }
 
     buildTypes {
