@@ -189,6 +189,12 @@ class MainActivity : Activity() {
         }
         nb.alpha = 0.92f
         nb.setOnClickListener { tapNative() }
+        /* v34: ⛶ ko 2 second DABAYE RAHO = native player ka self-test
+           (public sample mp4 — agar ye chala to native theek hai, masla link ka hai) */
+        nb.setOnLongClickListener {
+            openNative("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "Native Test")
+            true
+        }
         nBtn = nb
         root.addView(nb, FrameLayout.LayoutParams(dp(46), dp(46)).apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
@@ -352,7 +358,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 33
+            fun appVersion(): Int = 34
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
