@@ -332,10 +332,21 @@ class MainActivity : Activity() {
 
             /* v26: DM notification — page se aati hai, sirf jab app saamne na ho */
             @android.webkit.JavascriptInterface
-            fun notify(title: String?, text: String?) { postNote(title, text) }
+            fun notify(title: String?, text: String?) { postNote(title, text, null) }
+
+            /* v40: notification me "Reply" button -> jawab isi WebView ke page se jayega */
+            @android.webkit.JavascriptInterface
+            fun notifyFrom(title: String?, text: String?, code: String?) {
+                NotifHub.setReplyTarget { c, t ->
+                    web.post {
+                        try { web.evaluateJavascript(NotifHub.quickReplyJs(c, t), null) } catch (e: Throwable) {}
+                    }
+                }
+                postNote(title, text, code)
+            }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 39
+            fun appVersion(): Int = 40
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -544,9 +555,14 @@ class MainActivity : Activity() {
 
     /* ---------------- v26: DM notifications ---------------- */
 
-    private fun postNote(title: String?, text: String?) {
+    private fun postNote(title: String?, text: String?, code: String?) {
         if (resumed) return            // app saamne hai -> toast/page khud dikha dega
-        NotifHub.post(this, title, text, "fg")
+        NotifHub.post(this, title, text, "fg", code)
+    }
+
+    override fun onDestroy() {
+        try { NotifHub.setReplyTarget(null) } catch (t: Throwable) {}
+        super.onDestroy()
     }
 
     @Deprecated("Handled below")

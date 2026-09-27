@@ -144,6 +144,18 @@ class BgNotifyService : Service() {
             NotifHub.post(this@BgNotifyService, title, text, "bg")
         }
 
+        /* v40: notification me "Reply" button -> jo likha jaye wo isi page se jaye */
+        @android.webkit.JavascriptInterface
+        fun notifyFrom(title: String?, text: String?, code: String?) {
+            lastPing = System.currentTimeMillis()
+            NotifHub.setReplyTarget { c, t ->
+                web?.post {
+                    try { web?.evaluateJavascript(NotifHub.quickReplyJs(c, t), null) } catch (e: Throwable) {}
+                }
+            }
+            NotifHub.post(this@BgNotifyService, title, text, "bg", code)
+        }
+
         @android.webkit.JavascriptInterface
         fun bgReady() { lastPing = System.currentTimeMillis() }
 
@@ -151,7 +163,7 @@ class BgNotifyService : Service() {
         fun bgPing() { lastPing = System.currentTimeMillis() }
 
         @android.webkit.JavascriptInterface
-        fun appVersion(): Int = 39
+        fun appVersion(): Int = 40
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -180,6 +192,7 @@ class BgNotifyService : Service() {
 
     override fun onDestroy() {
         running = false
+        try { NotifHub.setReplyTarget(null) } catch (t: Throwable) {}
         try { handler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
         try {
             web?.stopLoading()

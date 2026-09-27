@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -16,6 +17,11 @@ import android.util.Log
  *   2) app poora band  -> BgNotifyService ka chhupa WebView
  * Dono jagah se ek hi message aa sakta hai, is liye 8 second ke andar
  * same title+text dobara post nahi hota (duplicate notification se bachne ke liye).
+ *
+ * v40: DM notification me WhatsApp jaisa "Reply" button (inline remote input).
+ *      Likha hua text -> ReplyReceiver -> NotifHub.deliverReply() -> chalta hua
+ *      WebView (page) -> wahan E2E encrypt hoke MQTT pe chala jata hai.
+ *      Is liye app band hone pe bhi notification se seedha jawab diya ja sakta hai.
  */
 object NotifHub {
 
@@ -23,8 +29,43 @@ object NotifHub {
     private const val CH_BG = "bg2"
     private const val CH_BG_OLD = "bg"
 
+    const val REPLY_KEY = "yp_reply_text"
+    const val ACTION_REPLY = "app.party.music.REPLY"
+
     private var lastKey = ""
     private var lastTs = 0L
+
+    /** v40: jo host abhi notification post kar raha hai, uska reply-injector. */
+    @Volatile
+    private var replyFn: ((String, String) -> Unit)? = null
+
+    fun setReplyTarget(fn: ((String, String) -> Unit)?) { replyFn = fn }
+
+    /** ReplyReceiver se aaya text page ko do. true = page ne accep kar liya. */
+    fun deliverReply(code: String, text: String): Boolean {
+        val f = replyFn ?: return false
+        return try {
+            f(code, text)
+            true
+        } catch (t: Throwable) {
+            Log.e("MusicParty", "reply deliver fail", t)
+            false
+        }
+    }
+
+    /** Page ke quick-reply function ko call karne wali safe JS. */
+    fun quickReplyJs(code: String, text: String): String {
+        val c = org.json.JSONObject.quote(code)
+        val t = org.json.JSONObject.quote(text)
+        return "(function(){try{return !!(window.yaarQuickReply&&window.yaarQuickReply(" + c + "," + t +
+                "));}catch(e){return false;}})()"
+    }
+
+    fun cancel(ctx: Context, id: Int) {
+        try {
+            (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(id)
+        } catch (t: Throwable) {}
+    }
 
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
@@ -59,8 +100,25 @@ object NotifHub {
         )
     }
 
-    /** DM message ki notification (app saamne na ho to). */
-    fun post(ctx: Context, title: String?, text: String?, src: String) {
+    /**
+     * v40: Reply button ka PendingIntent. RemoteInput ko kaam karne ke liye
+     * Android 12+ pe FLAG_MUTABLE laazmi hai (IMMUTABLE se system text nahi likh paata).
+     * Har peer ka apna request code (=notification id) hai, warna ek peer ka reply
+     * doosre ke paas chala jata.
+     */
+    private fun replyIntent(ctx: Context, peer: String, nid: Int): PendingIntent {
+        val i = Intent(ctx, ReplyReceiver::class.java)
+            .setAction(ACTION_REPLY)
+            .putExtra("code", peer)
+            .putExtra("nid", nid)
+        val flags = if (Build.VERSION.SDK_INT >= 31)
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        else PendingIntent.FLAG_UPDATE_CURRENT
+        return PendingIntent.getBroadcast(ctx, nid, i, flags)
+    }
+
+    /** DM message ki notification (app saamne na ho to). peer = bhejne wale ka code. */
+    fun post(ctx: Context, title: String?, text: String?, src: String, peer: String? = null) {
         synchronized(this) {
             val key = (title ?: "") + "|" + (text ?: "")
             val now = System.currentTimeMillis()
@@ -71,6 +129,10 @@ object NotifHub {
         try {
             ensureChannels(ctx)
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val hasPeer = !peer.isNullOrEmpty()
+            /* peer ka apna id -> usi chat ki purani notification update hoti hai */
+            val nid = if (hasPeer) 6000 + (Math.abs(peer!!.hashCode()) % 900)
+                      else (System.currentTimeMillis() % 100000).toInt()
             val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, CH_DM) else Notification.Builder(ctx)
             b.setSmallIcon(R.drawable.app_icon)
                 .setContentTitle(title ?: "\uD83D\uDCAC Messages")
@@ -78,7 +140,20 @@ object NotifHub {
                 .setAutoCancel(true)
                 .setContentIntent(openApp(ctx))
             if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
-            nm.notify((System.currentTimeMillis() % 100000).toInt(), b.build())
+            if (hasPeer) {
+                try {
+                    val ri = RemoteInput.Builder(REPLY_KEY).setLabel("Reply likho…").build()
+                    @Suppress("DEPRECATION")
+                    val act = Notification.Action.Builder(R.drawable.app_icon, "Reply", replyIntent(ctx, peer!!, nid))
+                        .addRemoteInput(ri)
+                        .setAllowGeneratedReplies(true)
+                        .build()
+                    b.addAction(act)
+                } catch (t: Throwable) {
+                    Log.e("MusicParty", "reply action fail", t)
+                }
+            }
+            nm.notify(nid, b.build())
         } catch (t: Throwable) {
             Log.e("MusicParty", "notify fail", t)
         }

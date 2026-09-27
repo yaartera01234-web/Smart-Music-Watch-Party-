@@ -52,6 +52,11 @@
                 android:value="dm_notifications" />
         </service>
 
+        <!-- v40: DM notification ka "Reply" button isi receiver ko aata hai -->
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false" />
+
         <!-- v25: Media3 playback service -> background play + notification -->
         <service
             android:name=".PlaybackService"
