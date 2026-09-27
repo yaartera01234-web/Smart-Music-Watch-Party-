@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music"
         minSdk = 24
         targetSdk = 35
-        versionCode = 27
-        versionName = "27"
+        versionCode = 28
+        versionName = "28"
     }
 
     buildTypes {
@@ -49,4 +49,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
+    // v28: HLS (.m3u8) + DASH (.mpd) native support — pehle ye missing tha,
+    // is liye direct HLS links native player me nahi chalte the
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
 }
