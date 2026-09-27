@@ -64,6 +64,10 @@ class MainActivity : Activity() {
     private var pendingWebPerm: PermissionRequest? = null
     private var resumed = false
 
+    /* v30: native player ka apna (Android) button + auto-detect — page ke JS pe bharosa nahi */
+    private var nBtn: TextView? = null
+    private var lastAutoUrl = ""
+
     /* v27: app background/band hone pe DM notifications ke liye chhupa WebView service */
     private val bgHandler = Handler(Looper.getMainLooper())
     private val bgStarter = Runnable {
@@ -170,6 +174,27 @@ class MainActivity : Activity() {
         bnp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         bnp.bottomMargin = dp(34)
         root.addView(banner, bnp)
+
+        /* ---------- v30: ⛶ Native Player (Android ka apna button) ---------- */
+        val nb = TextView(this)
+        nb.text = "\u26F6"
+        nb.textSize = 20f
+        nb.gravity = Gravity.CENTER
+        nb.setTextColor(Color.parseColor("#08131f"))
+        nb.background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(Color.parseColor("#54E8FF"))
+            setStroke(dp(2), Color.parseColor("#8B72FF"))
+        }
+        nb.alpha = 0.92f
+        nb.setOnClickListener { tapNative() }
+        nBtn = nb
+        root.addView(nb, FrameLayout.LayoutParams(dp(46), dp(46)).apply {
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            leftMargin = dp(4)
+        })
+
+        bgHandler.postDelayed(watchMp4, 4000)
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
@@ -323,7 +348,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 29
+            fun appVersion(): Int = 30
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -437,6 +462,73 @@ class MainActivity : Activity() {
     }
 
     // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
+
+    /* ---------------- v30: native player ko page se khud pakro ---------------- */
+
+    private val JS_WATCH = "(function(){try{var v=document.getElementById('mp4-player');if(!v)return '';" +
+            "var u=v.currentSrc||v.src||'';if((v.className||'').indexOf('hidden')>=0)return '';" +
+            "if(u.indexOf('http')!==0&&u.indexOf('blob:')!==0)return '';return u;}catch(e){return '';}})()"
+
+    private val JS_GET = "(function(){try{var v=document.getElementById('mp4-player');var u=v?(v.currentSrc||v.src||''):'';" +
+            "var t=document.getElementById('mini-title');return (u||'')+'\\u0001'+(t?(t.textContent||''):'');}catch(e){return '';}})()"
+
+    private fun jstr(res: String?): String {
+        if (res == null || res == "null") return ""
+        return try { org.json.JSONObject("{\"v\":$res}").getString("v") } catch (t: Throwable) { "" }
+    }
+
+    private fun pausePagePlayer() {
+        try {
+            web.evaluateJavascript(
+                "(function(){try{if(typeof suppressMP4!=='undefined')suppressMP4=true;}catch(e){}" +
+                "try{var v=document.getElementById('mp4-player');if(v)v.pause();}catch(e){}})()", null
+            )
+        } catch (t: Throwable) {}
+    }
+
+    private fun openNative(url: String, title: String?) {
+        if (url.isBlank()) return
+        pausePagePlayer()
+        runOnUiThread {
+            try {
+                startActivity(Intent(this, PlayerActivity::class.java).apply {
+                    putExtra("url", url)
+                    putExtra("title", title ?: "Video")
+                })
+            } catch (t: Throwable) { showBanner("\u26a0\ufe0f Native player nahi khula") }
+        }
+    }
+
+    private fun tapNative() {
+        try {
+            web.evaluateJavascript(JS_GET) { res ->
+                val parts = jstr(res).split('\u0001')
+                val url = parts.getOrNull(0)?.trim() ?: ""
+                val title = parts.getOrNull(1)?.trim() ?: "Video"
+                if (url.startsWith("http") || url.startsWith("blob:")) openNative(url, title)
+                else showBanner("\u26a0\ufe0f Pehle koi direct video link lagao (mp4 / m3u8)")
+            }
+        } catch (t: Throwable) {}
+    }
+
+    private val watchMp4 = object : Runnable {
+        override fun run() {
+            try {
+                if (resumed) {
+                    web.evaluateJavascript(JS_WATCH) { res ->
+                        try {
+                            val u = jstr(res).trim()
+                            if (u.length > 8 && u != lastAutoUrl) {
+                                lastAutoUrl = u
+                                openNative(u, null)
+                            }
+                        } catch (t: Throwable) {}
+                    }
+                }
+            } catch (t: Throwable) {}
+            bgHandler.postDelayed(this, 1500)
+        }
+    }
 
     /* ---------------- v26: DM notifications ---------------- */
 
