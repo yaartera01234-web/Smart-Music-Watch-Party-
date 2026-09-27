@@ -200,10 +200,13 @@ class MainActivity : Activity() {
 
         val crash = runCatching { getFileStreamPath("crash.txt").takeIf { it.exists() }?.readText() }.getOrNull()
         if (crash != null) {
-            status.text = "CRASH REPORT (screenshot le lein):\n${crash.take(500)}"
+            status.text = "CRASH REPORT (tap karne pe hatega):\n${crash.take(1400)}"
             status.visibility = View.VISIBLE
-            getFileStreamPath("crash.txt").delete()
-            status.postDelayed({ status.visibility = View.GONE }, 8000)
+            status.isClickable = true
+            status.setOnClickListener {
+                status.visibility = View.GONE
+                runCatching { getFileStreamPath("crash.txt").delete() }
+            }
         }
 
         // Full cookie support so logged-in sessions and the iframe player behave normally.
@@ -348,7 +351,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 30
+            fun appVersion(): Int = 31
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
