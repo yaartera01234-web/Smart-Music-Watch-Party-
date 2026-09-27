@@ -20,7 +20,8 @@ import android.util.Log
 object NotifHub {
 
     private const val CH_DM = "dm"
-    private const val CH_BG = "bg"
+    private const val CH_BG = "bg2"
+    private const val CH_BG_OLD = "bg"
 
     private var lastKey = ""
     private var lastTs = 0L
@@ -33,9 +34,15 @@ object NotifHub {
             dm.enableVibration(true)
             dm.description = "Dost ke DM messages"
             nm.createNotificationChannel(dm)
-            val bg = NotificationChannel(CH_BG, "Background (messages on)", NotificationManager.IMPORTANCE_LOW)
+            /* v29: purana "bg" channel hata do (uski importance badli nahi ja sakti) */
+            try { nm.deleteNotificationChannel(CH_BG_OLD) } catch (t: Throwable) {}
+            val bg = NotificationChannel(CH_BG, "Background (messages on)", NotificationManager.IMPORTANCE_MIN)
             bg.setShowBadge(false)
-            bg.description = "App band hone pe bhi messages aate rahen"
+            bg.enableLights(false)
+            bg.enableVibration(false)
+            bg.setSound(null, null)
+            bg.lockscreenVisibility = Notification.VISIBILITY_SECRET
+            bg.description = "App band hone pe bhi messages aate rahen (chup-chaap)"
             nm.createNotificationChannel(bg)
         } catch (t: Throwable) {
             Log.e("MusicParty", "channel fail", t)
@@ -85,6 +92,8 @@ object NotifHub {
             .setContentTitle("\uD83D\uDCAC Messages on")
             .setContentText("Naya message aane pe notification aayegi")
             .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
             .setContentIntent(openApp(ctx))
         if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
         return b.build()
