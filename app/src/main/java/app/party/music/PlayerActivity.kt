@@ -10,13 +10,16 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
+import android.webkit.CookieManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -26,42 +29,58 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import java.util.Date
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
  * v26: Native Player (Media3) + naye controls.
+ * v29: dual audio (audio track switch).
+ * v31: crash guard.
+ * v32: HAR STEP apna try/catch — koi ek cheez fail ho to native phir bhi khule.
+ *      + MediaController (background/notification) fail ho to LOCAL ExoPlayer fallback.
+ *      + error poori screen pe (tap = hatao) aur crash.txt me (agle launch pe banner).
  *
- *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS (chamak)
+ *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS
  *  - Right side pe ungli se UPAR/NEEche -> VOLUME
- *  - Upar-daayen button: Fit / Fill / Zoom (crop) — yaad bhi rehta hai
- *  - HUD indicator beech me dikhta hai (☀ % / 🔊)
- *  - Background me chalta rehta hai + notification me controls (PlaybackService)
+ *  - Upar-daayen: Fit / Fill / Zoom  |  Upar-baayen: Audio 1/2
  */
 @UnstableApi
 class PlayerActivity : Activity() {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
-    private var note: TextView? = null
-    private var pv: PlayerView? = null
-    private var modeBtn: TextView? = null
+    private var localPlayer: ExoPlayer? = null
+    private var localMode = false
+    private var started = false
 
+    private var root: FrameLayout? = null
+    private var note: TextView? = null
+    private var errText: TextView? = null
+    private var pv: PlayerView? = null
+    private var sv: SurfaceView? = null
+    private var modeBtn: TextView? = null
     private var audioBtn: TextView? = null
     private var hud: LinearLayout? = null
     private var hudText: TextView? = null
     private var hudBar: ProgressBar? = null
 
-    private lateinit var am: AudioManager
-    private lateinit var prefs: SharedPreferences
+    private var am: AudioManager? = null
+    private var prefs: SharedPreferences? = null
     private val hideRunnable = Runnable { hud?.visibility = View.GONE }
     private var maxVol = 15
+    private val stepErrs = StringBuilder()
 
     private val modes = intArrayOf(
         AspectRatioFrameLayout.RESIZE_MODE_FIT,
@@ -79,104 +98,156 @@ class PlayerActivity : Activity() {
     private var gStartBright = 0.5f
     private var gStartVol = 0
 
+    /* ================= lifecycle ================= */
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        /* v31: poora setup try me — koi bhi error app ko crash na kare */
+        /* v31: crash guard. v32: har step alag — ek fail ho to baqi chalta rahe. */
         try {
             buildUi()
         } catch (t: Throwable) {
-            try {
-                Toast.makeText(this, "\u26a0\ufe0f Native player nahi khula: " + (t.message ?: t.javaClass.simpleName), Toast.LENGTH_LONG).show()
-            } catch (e: Throwable) {}
-            finish()
+            fail("create", t)
+            showErrPanel()
         }
     }
 
     private fun buildUi() {
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        immersive()
+        step("immersive") { immersive() }
 
-        am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        prefs = getSharedPreferences("yp_player", Context.MODE_PRIVATE)
-        modeIdx = prefs.getInt("mode", 0).let { if (it < 0 || it > 2) 0 else it }
-
-        val root = FrameLayout(this)
-        root.setBackgroundColor(0xFF000000.toInt())
-
-        val playerView = PlayerView(this)
-        playerView.useController = true
-        playerView.setShowNextButton(false)
-        playerView.setShowPreviousButton(false)
-        playerView.resizeMode = modes[modeIdx]
-        pv = playerView
-        root.addView(playerView, FrameLayout.LayoutParams(-1, -1))
-
-        note = TextView(this).apply {
-            setTextColor(0xFFFF5FA2.toInt())
-            textSize = 13f
-            visibility = View.GONE
+        step("audio") {
+            am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            maxVol = am!!.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
         }
-        root.addView(note, FrameLayout.LayoutParams(-2, -2).apply { leftMargin = 40; topMargin = 60 })
-
-        /* ---- crop button (Fit / Fill / Zoom) ---- */
-        modeBtn = TextView(this).apply {
-            textSize = 12f
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(0x99000000.toInt())
-            text = modeIcons[modeIdx] + "  " + modeNames[modeIdx]
-            setOnClickListener { cycleMode() }
+        step("prefs") {
+            prefs = getSharedPreferences("yp_player", Context.MODE_PRIVATE)
+            val m = prefs!!.getInt("mode", 0)
+            modeIdx = if (m < 0 || m > 2) 0 else m
         }
-        root.addView(modeBtn, FrameLayout.LayoutParams(-2, -2).apply {
-            gravity = Gravity.TOP or Gravity.END
-            topMargin = dp(16)
-            rightMargin = dp(16)
-        })
 
-        /* ---- v29: DUAL AUDIO (audio track switch) ---- */
-        audioBtn = TextView(this).apply {
-            textSize = 12f
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(0x99000000.toInt())
-            text = "\uD83D\uDD0A  Audio"
-            setOnClickListener { cycleAudio() }
-        }
-        root.addView(audioBtn, FrameLayout.LayoutParams(-2, -2).apply {
-            gravity = Gravity.TOP or Gravity.START
-            topMargin = dp(16)
-            leftMargin = dp(16)
-        })
+        val r = FrameLayout(this)
+        r.setBackgroundColor(0xFF000000.toInt())
+        root = r
 
-        /* ---- HUD (brightness / volume indicator) ---- */
-        hudText = TextView(this).apply {
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 14f
-            setPadding(0, 0, dp(12), 0)
+        step("playerView") {
+            val p = PlayerView(this)
+            p.useController = true
+            p.setShowNextButton(false)
+            p.setShowPreviousButton(false)
+            p.resizeMode = modes[modeIdx]
+            pv = p
+            r.addView(p, FrameLayout.LayoutParams(-1, -1))
         }
-        hudBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progress = 50
+        if (pv == null) {
+            /* PlayerView ban na sake to simple SurfaceView se video chalao */
+            step("surface") {
+                val s = SurfaceView(this)
+                sv = s
+                r.addView(s, FrameLayout.LayoutParams(-1, -1))
+            }
         }
-        hud = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xCC000000.toInt())
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            visibility = View.GONE
-            addView(hudText, LinearLayout.LayoutParams(-2, -2))
-            addView(hudBar, LinearLayout.LayoutParams(dp(220), dp(10)))
-        }
-        root.addView(hud, FrameLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER })
 
-        setContentView(root)
+        step("note") {
+            val t = TextView(this).apply {
+                setTextColor(0xFFFF5FA2.toInt())
+                textSize = 13f
+                visibility = View.GONE
+            }
+            note = t
+            r.addView(t, FrameLayout.LayoutParams(-2, -2).apply { leftMargin = dp(40); topMargin = dp(60) })
+        }
 
-        val url = intent.getStringExtra("url")
-        val title = intent.getStringExtra("title") ?: "Video"
-        val pos = intent.getLongExtra("pos", 0L)
+        step("modeBtn") {
+            val b = TextView(this).apply {
+                textSize = 12f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setBackgroundColor(0x99000000.toInt())
+                text = modeIcons[modeIdx] + "  " + modeNames[modeIdx]
+                setOnClickListener { cycleMode() }
+            }
+            modeBtn = b
+            r.addView(b, FrameLayout.LayoutParams(-2, -2).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = dp(16)
+                rightMargin = dp(16)
+            })
+        }
+
+        step("audioBtn") {
+            val b = TextView(this).apply {
+                textSize = 12f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setBackgroundColor(0x99000000.toInt())
+                text = "\uD83D\uDD0A  Audio"
+                setOnClickListener { cycleAudio() }
+            }
+            audioBtn = b
+            r.addView(b, FrameLayout.LayoutParams(-2, -2).apply {
+                gravity = Gravity.TOP or Gravity.START
+                topMargin = dp(16)
+                leftMargin = dp(16)
+            })
+        }
+
+        step("hud") {
+            hudText = TextView(this).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 14f
+                setPadding(0, 0, dp(12), 0)
+            }
+            hudBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                progress = 50
+            }
+            val l = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(0xCC000000.toInt())
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                visibility = View.GONE
+                addView(hudText, LinearLayout.LayoutParams(-2, -2))
+                addView(hudBar, LinearLayout.LayoutParams(dp(220), dp(10)))
+            }
+            hud = l
+            r.addView(l, FrameLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER })
+        }
+
+        step("show") { setContentView(r) }
+
+        val url = try { intent.getStringExtra("url") } catch (t: Throwable) { null }
+        val title = try { intent.getStringExtra("title") } catch (t: Throwable) { null } ?: "Video"
+        val pos = try { intent.getLongExtra("pos", 0L) } catch (t: Throwable) { 0L }
         if (url.isNullOrBlank()) { finish(); return }
 
+        /* 1) MediaController (background play + notification). Fail ho to 2) local player. */
+        val ok = step("session") { startController(url, title, pos) }
+        if (!ok || !started) startLocalIfNeeded(url, title, pos)
+
+        if (!started && stepErrs.isNotEmpty()) showErrPanel()
+    }
+
+    /* ================= player start ================= */
+
+    private fun attach(p: Player) {
+        try {
+            val v = pv
+            if (v != null) v.player = p
+            else sv?.let { p.setVideoSurfaceView(it) }
+        } catch (t: Throwable) { fail("attach", t) }
+    }
+
+    private fun mediaItem(url: String, title: String): MediaItem {
+        val lower = url.lowercase()
+        val b = MediaItem.Builder()
+            .setUri(url)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
+        if (lower.contains(".m3u8")) b.setMimeType(MimeTypes.APPLICATION_M3U8)
+        else if (lower.contains(".mpd")) b.setMimeType(MimeTypes.APPLICATION_MPD)
+        return b.build()
+    }
+
+    private fun startController(url: String, title: String, pos: Long) {
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val f = MediaController.Builder(this, token).buildAsync()
         controllerFuture = f
@@ -184,16 +255,9 @@ class PlayerActivity : Activity() {
             try {
                 val c = f.get()
                 controller = c
-                playerView.player = c
-                /* v28: m3u8/mpd ka hint — warna bina extension wale links fail hote hain */
-                val lower = url.lowercase()
-                val mb = MediaItem.Builder()
-                    .setUri(url)
-                    .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
-                if (lower.contains(".m3u8")) mb.setMimeType(MimeTypes.APPLICATION_M3U8)
-                else if (lower.contains(".mpd")) mb.setMimeType(MimeTypes.APPLICATION_MPD)
-                val item = mb.build()
-                c.setMediaItem(item, pos)
+                started = true
+                attach(c)
+                c.setMediaItem(mediaItem(url, title), pos)
                 c.prepare()
                 c.play()
                 c.addListener(object : Player.Listener {
@@ -206,10 +270,72 @@ class PlayerActivity : Activity() {
                     }
                 })
             } catch (t: Throwable) {
-                showNote("\u26a0\ufe0f Player start nahi hua")
+                fail("controller", t)
+                runOnUiThread { startLocalIfNeeded(url, title, pos) }
             }
         }, MoreExecutors.directExecutor())
     }
+
+    /** Background service na bane to seedha yahin player — video phir bhi chale. */
+    private fun startLocalIfNeeded(url: String, title: String, pos: Long) {
+        if (started) return
+        try {
+            startLocal(url, title, pos)
+        } catch (t: Throwable) {
+            fail("localPlayer", t)
+            showErrPanel()
+            showNote("\u26a0\ufe0f Native player start nahi ho saka")
+        }
+    }
+
+    private fun startLocal(url: String, title: String, pos: Long) {
+        val ua = try { android.webkit.WebSettings.getDefaultUserAgent(this) } catch (t: Throwable) { "Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile Safari/537.36" }
+        val base = DefaultHttpDataSource.Factory()
+            .setUserAgent(ua)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(20000)
+            .setAllowCrossProtocolRedirects(true)
+        val withCookies = ResolvingDataSource.Factory(base) { spec ->
+            val u = spec.uri.toString()
+            val hdrs = HashMap<String, String>()
+            try {
+                val ck = CookieManager.getInstance().getCookie(u)
+                if (!ck.isNullOrBlank()) hdrs["Cookie"] = ck
+            } catch (t: Throwable) {}
+            hdrs["Referer"] = "https://yaartera01234-web.github.io/"
+            spec.withRequestHeaders(hdrs)
+        }
+        val ds = DefaultDataSource.Factory(this, withCookies)
+        val p = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(ds)).build()
+        try {
+            p.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
+            p.setHandleAudioBecomingNoisy(true)
+        } catch (t: Throwable) {}
+        localPlayer = p
+        localMode = true
+        started = true
+        attach(p)
+        p.setMediaItem(mediaItem(url, title), pos)
+        p.prepare()
+        p.play()
+        p.addListener(object : Player.Listener {
+            override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
+            override fun onPlayerError(error: PlaybackException) {
+                showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
+                try {
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish() }, 2400)
+                } catch (t: Throwable) {}
+            }
+        })
+    }
+
+    private fun cur(): Player? = controller ?: localPlayer
 
     /* ---------------- v29: dual audio (track switch) ---------------- */
 
@@ -239,18 +365,18 @@ class PlayerActivity : Activity() {
     }
 
     private fun refreshAudioBtn() {
-        val p = controller ?: return
+        val p = cur() ?: return
         val list = audioList(p); val idx = audioCur(p)
         val b = audioBtn ?: return
         b.text = if (list.size > 1) "\uD83D\uDD0A  " + (idx + 1).coerceAtLeast(1) + "/" + list.size else "\uD83D\uDD0A  Audio"
     }
 
     private fun cycleAudio() {
-        val p = controller ?: return
+        val p = cur() ?: return
         val list = audioList(p)
         if (list.size <= 1) { showNote("\u26a0\ufe0f Is video me sirf ek hi audio hai"); return }
-        val cur = audioCur(p)
-        val nxt = ((cur + 1) % list.size + list.size) % list.size
+        val curI = audioCur(p)
+        val nxt = ((curI + 1) % list.size + list.size) % list.size
         val pair = list[nxt]
         try {
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
@@ -265,56 +391,58 @@ class PlayerActivity : Activity() {
 
     private fun cycleMode() {
         modeIdx = (modeIdx + 1) % modes.size
-        pv?.resizeMode = modes[modeIdx]
+        try { pv?.resizeMode = modes[modeIdx] } catch (t: Throwable) {}
         modeBtn?.text = modeIcons[modeIdx] + "  " + modeNames[modeIdx]
-        try { prefs.edit().putInt("mode", modeIdx).apply() } catch (e: Throwable) {}
+        try { prefs?.edit()?.putInt("mode", modeIdx)?.apply() } catch (e: Throwable) {}
         showHud("\u26f6", (modeIdx + 1) * 33, modeNames[modeIdx])
     }
 
     /* ---------------- brightness + volume gestures ---------------- */
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        val h = resources.displayMetrics.heightPixels.toFloat()
-        val w = resources.displayMetrics.widthPixels.toFloat()
-        when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                gStartX = ev.x; gStartY = ev.y; gActive = false; gZone = 0
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val dy = ev.y - gStartY
-                val dx = ev.x - gStartX
-                if (!gActive) {
-                    if (abs(dy) > dp(22).toFloat() && abs(dy) > abs(dx) * 1.5f) {
-                        gActive = true
-                        gZone = if (gStartX < w / 2f) 1 else 2
-                        gStartBright = currentBrightness()
-                        gStartVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        try {
+            val h = resources.displayMetrics.heightPixels.toFloat()
+            val w = resources.displayMetrics.widthPixels.toFloat()
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    gStartX = ev.x; gStartY = ev.y; gActive = false; gZone = 0
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = ev.y - gStartY
+                    val dx = ev.x - gStartX
+                    if (!gActive) {
+                        if (abs(dy) > dp(22).toFloat() && abs(dy) > abs(dx) * 1.5f) {
+                            gActive = true
+                            gZone = if (gStartX < w / 2f) 1 else 2
+                            gStartBright = currentBrightness()
+                            gStartVol = am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+                        }
+                    }
+                    if (gActive) {
+                        val pct = -dy / (h * 0.55f)          // upar = zyada
+                        if (gZone == 1) {
+                            val b = (gStartBright + pct).coerceIn(0.02f, 1f)
+                            applyBrightness(b)
+                            val percent = (b * 100f).roundToInt()
+                            showHud("\u2600\ufe0f", percent, "$percent%")
+                        } else {
+                            val nv = (gStartVol + pct * maxVol).roundToInt().coerceIn(0, maxVol)
+                            try { am?.setStreamVolume(AudioManager.STREAM_MUSIC, nv, 0) } catch (e: Throwable) {}
+                            val percent = ((nv * 100f) / maxVol).roundToInt()
+                            showHud("\uD83D\uDD0A", percent, "$nv/$maxVol")
+                        }
+                        return true
                     }
                 }
-                if (gActive) {
-                    val pct = -dy / (h * 0.55f)          // upar = zyada
-                    if (gZone == 1) {
-                        val b = (gStartBright + pct).coerceIn(0.02f, 1f)
-                        applyBrightness(b)
-                        val percent = (b * 100f).roundToInt()
-                        showHud("\u2600\ufe0f", percent, "$percent%")
-                    } else {
-                        val nv = (gStartVol + pct * maxVol).roundToInt().coerceIn(0, maxVol)
-                        try { am.setStreamVolume(AudioManager.STREAM_MUSIC, nv, 0) } catch (e: Throwable) {}
-                        val percent = ((nv * 100f) / maxVol).roundToInt()
-                        showHud("\uD83D\uDD0A", percent, "$nv/$maxVol")
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (gActive) {
+                        gActive = false
+                        hideHudLater()
+                        return true
                     }
-                    return true
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (gActive) {
-                    gActive = false
-                    hideHudLater()
-                    return true
-                }
-            }
-        }
+        } catch (t: Throwable) {}
         return super.dispatchTouchEvent(ev)
     }
 
@@ -355,7 +483,7 @@ class PlayerActivity : Activity() {
         runOnUiThread {
             note?.text = msg
             note?.visibility = View.VISIBLE
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            try { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } catch (t: Throwable) {}
         }
     }
 
@@ -379,11 +507,76 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /* ---------------- error reporting (v32) ---------------- */
+
+    private fun step(name: String, block: () -> Unit): Boolean {
+        return try {
+            block()
+            true
+        } catch (t: Throwable) {
+            fail(name, t)
+            false
+        }
+    }
+
+    private fun fail(name: String, t: Throwable) {
+        try {
+            stepErrs.append("\n\u2022 ").append(name).append(": ").append(t.message ?: t.javaClass.name)
+        } catch (e: Throwable) {}
+        try {
+            val sw = java.io.StringWriter()
+            t.printStackTrace(java.io.PrintWriter(sw))
+            val f = getFileStreamPath("crash.txt")
+            f.appendText("\n[" + Date() + "] v32 " + name + "\n" + sw.toString().take(1200) + "\n")
+        } catch (e: Throwable) {}
+    }
+
+    private fun showErrPanel() {
+        runOnUiThread {
+            try {
+                val r = root
+                if (r == null || errText != null) return@runOnUiThread
+                val t = TextView(this).apply {
+                    setTextColor(0xFFFFD9E6.toInt())
+                    textSize = 11.5f
+                    setPadding(dp(14), dp(14), dp(14), dp(14))
+                    setBackgroundColor(0xF0100A1E.toInt())
+                    text = "NATIVE PLAYER \u2014 v32 error\n" + stepErrs.toString().take(900) + "\n\n(koi bhi jagah tap = yeh hata do)"
+                    setOnClickListener { visibility = View.GONE }
+                }
+                errText = t
+                r.addView(t, FrameLayout.LayoutParams(-1, -2).apply {
+                    gravity = Gravity.TOP
+                    topMargin = dp(64)
+                })
+            } catch (e: Throwable) {}
+        }
+    }
+
+    /* ---------------- lifecycle end ---------------- */
+
     override fun onStop() {
         super.onStop()
-        // Background me chalta rehna hai -> controller chhod do, service player chala rahi hai.
-        controllerFuture?.let { runCatching { MediaController.releaseFuture(it) } }
-        controllerFuture = null
-        controller = null
+        val c = controller
+        if (c != null) {
+            try { if (isFinishing) c.pause() } catch (t: Throwable) {}
+            controllerFuture?.let { runCatching { MediaController.releaseFuture(it) } }
+            controllerFuture = null
+            controller = null
+        }
+        if (localMode) {
+            /* Background me chalne ke liye service wala player behtar hai; local chalta rahe jab tak activity zinda hai. */
+            if (isFinishing) runCatching { localPlayer?.pause() }
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            if (localMode) {
+                runCatching { localPlayer?.release() }
+            }
+        } catch (t: Throwable) {}
+        localPlayer = null
+        super.onDestroy()
     }
 }
