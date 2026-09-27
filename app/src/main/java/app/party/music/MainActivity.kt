@@ -176,36 +176,9 @@ class MainActivity : Activity() {
         bnp.bottomMargin = dp(34)
         root.addView(banner, bnp)
 
-        /* ---------- v30: ⛶ Native Player (Android ka apna button) ---------- */
-        val nb = TextView(this)
-        nb.text = "\u26F6"
-        nb.textSize = 20f
-        nb.gravity = Gravity.CENTER
-        nb.setTextColor(Color.parseColor("#08131f"))
-        nb.background = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(Color.parseColor("#54E8FF"))
-            setStroke(dp(2), Color.parseColor("#8B72FF"))
-        }
-        nb.alpha = 0.92f
-        nb.setOnClickListener { tapNative() }
-        /* v34: ⛶ ko 2 second DABAYE RAHO = native player ka self-test
-           (public sample mp4 — agar ye chala to native theek hai, masla link ka hai) */
-        nb.setOnLongClickListener {
-            openNative(
-                "https://raw.githubusercontent.com/mediaelement/mediaelement-files/master/big_buck_bunny.mp4",
-                "Native Test",
-                "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
-            )
-            true
-        }
-        nBtn = nb
-        root.addView(nb, FrameLayout.LayoutParams(dp(46), dp(46)).apply {
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            leftMargin = dp(4)
-        })
+        /* v38: native player BAND (user: "native ko dafa kro") — android ka ⛶ button
+           aur auto-open poller hata diya. Ab sirf premium (page wala) player chalta hai. */
 
-        bgHandler.postDelayed(watchMp4, 4000)
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
@@ -362,7 +335,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 37
+            fun appVersion(): Int = 38
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
