@@ -21,6 +21,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebResourceResponse
+import android.webkit.PermissionRequest
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -53,6 +54,7 @@ class MainActivity : Activity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
+    private var pendingWebPerm: PermissionRequest? = null
 
     private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
 
@@ -227,6 +229,18 @@ class MainActivity : Activity() {
                 web.visibility = View.VISIBLE
             }
 
+            // v25: page 🎤 (getUserMedia) -> WebView ka audio-capture request grant karo
+            override fun onPermissionRequest(request: PermissionRequest) {
+                val wantsAudio = request.resources.any { it == PermissionRequest.RESOURCE_AUDIO_CAPTURE }
+                if (!wantsAudio) { request.deny(); return }
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+                } else {
+                    pendingWebPerm = request
+                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
+                }
+            }
+
             // The page's raw JS alert() (e.g. "tower se jur raha hai") becomes a branded banner.
             override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult): Boolean {
                 showBanner(message ?: "")
@@ -263,12 +277,36 @@ class MainActivity : Activity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        // v25: voice message ke liye mic (page getUserMedia use karta hai)
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
+        }
 
         try {
             MusicService.start(this)
         } catch (t: Throwable) {
             Log.e("MusicParty", "service start failed", t)
         }
+
+        // v25 bridge: page se native player kholne ke liye (window.YaarNative.openPlayer)
+        web.addJavascriptInterface(object {
+            @android.webkit.JavascriptInterface
+            fun openPlayer(videoUrl: String, title: String?) {
+                runOnUiThread {
+                    try {
+                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java).apply {
+                            putExtra("url", videoUrl)
+                            putExtra("title", title ?: "Video")
+                        })
+                    } catch (t: Throwable) {
+                        showBanner("⚠️ Native player nahi khula")
+                    }
+                }
+            }
+
+            @android.webkit.JavascriptInterface
+            fun appVersion(): Int = 25
+        }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
         web.onGif = { gifUrl ->
@@ -281,6 +319,21 @@ class MainActivity : Activity() {
         // Har launch pe naya query lagane se page TAZA aata hai, warna naye fixes app me
         // dikhte hi nahi (assets/libs cache me rehte hain, sirf ~100KB page dobara aata hai).
         web.loadUrl(url + "?v=" + System.currentTimeMillis())
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 2) {
+            val r = pendingWebPerm
+            pendingWebPerm = null
+            if (r == null) return
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                r.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+            } else {
+                r.deny()
+                showBanner("🎤 Mic ki ijazat nahi mili — voice message ke liye Allow karein")
+            }
+        }
     }
 
     private fun showBanner(message: String) {
