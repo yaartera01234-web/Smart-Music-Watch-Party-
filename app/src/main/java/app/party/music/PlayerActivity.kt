@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
  * v32: HAR STEP apna try/catch — koi ek cheez fail ho to native phir bhi khule.
  *      + MediaController (background/notification) fail ho to LOCAL ExoPlayer fallback.
  *      + error poori screen pe (tap = hatao) aur crash.txt me (agle launch pe banner).
- * v35: DO-player bug fix (grace 2.6s + local release) + status line + saaf error screen.
+ * v36: DO-player bug fix (grace 2.6s + local release) + status line + saaf error screen.
  * v33: immersive() ab setContentView ke BAAD (wahi NPE tha jo app girata tha) + telemetry.
  *
  *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS
@@ -70,6 +70,8 @@ class PlayerActivity : Activity() {
     private var curTitle = "Video"
     private var altUrl: String? = null
     private var altTried = false
+    private var web: android.webkit.WebView? = null
+    private var webMode = false
 
     private var root: FrameLayout? = null
     private var status2: TextView? = null
@@ -224,7 +226,7 @@ class PlayerActivity : Activity() {
                 setTextColor(0xFFBFF3FF.toInt())
                 setPadding(dp(8), dp(4), dp(8), dp(4))
                 setBackgroundColor(0x99000000.toInt())
-                text = "v35 \u2022 starting\u2026"
+                text = "v36 \u2022 starting\u2026"
             }
             status2 = t
             r.addView(t, FrameLayout.LayoutParams(-2, -2).apply {
@@ -249,7 +251,7 @@ class PlayerActivity : Activity() {
         /* 1) MediaController (background play + notification). Fail ho to 2) local player. */
         val ok = step("session") { startController(url, title, pos) }
         if (ok) {
-            /* v35 FIX: controller ko connect hone ka waqt do (2.6s).
+            /* v36 FIX: controller ko connect hone ka waqt do (2.6s).
                Pehle hum foran local player bhi chala dete the -> DO player ek sath
                (aawaz double / video black / foran error -> screen band). */
             android.os.Handler(android.os.Looper.getMainLooper())
@@ -288,14 +290,14 @@ class PlayerActivity : Activity() {
         f.addListener({
             try {
                 val c = f.get()
-                if (localMode) {           /* v35: local fallback chal raha tha -> band karo, warna double aawaz */
+                if (localMode) {           /* v36: local fallback chal raha tha -> band karo, warna double aawaz */
                     try { localPlayer?.release() } catch (t: Throwable) {}
                     localPlayer = null
                     localMode = false
                 }
                 controller = c
                 started = true
-                setStatus("v35 \u2022 controller OK")
+                setStatus("v36 \u2022 controller OK")
                 attach(c)
                 c.setMediaItem(mediaItem(url, title), pos)
                 c.prepare()
@@ -305,7 +307,7 @@ class PlayerActivity : Activity() {
                     override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
                     override fun onPlaybackStateChanged(state: Int) {
                         logLine("state " + state)
-                        setStatus("v35 \u2022 controller \u2022 state " + state)
+                        setStatus("v36 \u2022 controller \u2022 state " + state)
                     }
                     override fun onPlayerError(error: PlaybackException) {
                         showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
@@ -367,12 +369,12 @@ class PlayerActivity : Activity() {
         p.prepare()
         p.play()
         logLine("local OK \u2014 playing")
-        setStatus("v35 \u2022 local player OK")
+        setStatus("v36 \u2022 local player OK")
         p.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
             override fun onPlaybackStateChanged(state: Int) {
                 logLine("local state " + state)
-                setStatus("v35 \u2022 local \u2022 state " + state)
+                setStatus("v36 \u2022 local \u2022 state " + state)
             }
             override fun onPlayerError(error: PlaybackException) {
                 showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
@@ -417,6 +419,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun cycleAudio() {
+        if (webMode) { showNote("\u26a0\ufe0f Is mode (page jaisa player) me dual audio nahi milta"); return }
         val p = cur() ?: return
         val list = audioList(p)
         if (list.size <= 1) { showNote("\u26a0\ufe0f Is video me sirf ek hi audio hai"); return }
@@ -437,6 +440,7 @@ class PlayerActivity : Activity() {
     private fun cycleMode() {
         modeIdx = (modeIdx + 1) % modes.size
         try { pv?.resizeMode = modes[modeIdx] } catch (t: Throwable) {}
+        if (webMode) webAspect()
         modeBtn?.text = modeIcons[modeIdx] + "  " + modeNames[modeIdx]
         try { prefs?.edit()?.putInt("mode", modeIdx)?.apply() } catch (e: Throwable) {}
         showHud("\u26f6", (modeIdx + 1) * 33, modeNames[modeIdx])
@@ -584,10 +588,10 @@ class PlayerActivity : Activity() {
         }
     }
 
-    /** v35: playback fail hone pe screen pe saaf wajah + tap = page player (khud se band nahi hoti). */
+    /** v36: playback fail hone pe screen pe saaf wajah + tap = page player (khud se band nahi hoti). */
     private fun showPlayErr(why: String) {
-        logLine("playFail " + why)
-        /* v35: pehla link nahi chala? doosra link khud try karo (self-test / mirror links) */
+        logLine("playFail " + why + " | url=" + curUrl.take(150))
+        /* v36: pehla link nahi chala? doosra link khud try karo (self-test / mirror links) */
         val a = altUrl
         if (!altTried && !a.isNullOrBlank()) {
             altTried = true
@@ -595,7 +599,7 @@ class PlayerActivity : Activity() {
             if (p != null) {
                 try {
                     logLine("trying ALT url")
-                    setStatus("v35 \u2022 alt link try ho raha hai\u2026")
+                    setStatus("v36 \u2022 alt link try ho raha hai\u2026")
                     p.setMediaItem(mediaItem(a, curTitle))
                     p.prepare()
                     p.play()
@@ -605,9 +609,15 @@ class PlayerActivity : Activity() {
                 }
             }
         }
+        /* v36: Media3 us link ko handle nahi kar pa raha? to wahi engine chalao jo
+           premium player me chalta hai (WebView) — jo page pe chalta hai wahi yahan bhi chalega */
+        if (!webMode) {
+            startWebFallback(curUrl)
+            return
+        }
         runOnUiThread {
             try {
-                setStatus("v35 \u2022 FAIL: " + why)
+                setStatus("v36 \u2022 FAIL: " + why)
                 val t = TextView(this).apply {
                     setTextColor(0xFFFFFFFF.toInt())
                     textSize = 12.5f
@@ -621,6 +631,69 @@ class PlayerActivity : Activity() {
                 t.postDelayed({ try { finish() } catch (e: Throwable) {} }, 10000)
             } catch (e: Throwable) {}
         }
+    }
+
+    /* ================= v36: WEBVIEW PLAYER (guaranteed fallback) ================= */
+
+    private fun startWebFallback(url: String) {
+        try {
+            webMode = true
+            started = true
+            /* Media3 band karo taake double aawaz na ho */
+            try { controller?.stop() } catch (t: Throwable) {}
+            try { localPlayer?.pause() } catch (t: Throwable) {}
+            logLine("webview fallback: " + url.take(140))
+
+            val w = android.webkit.WebView(this)
+            w.setBackgroundColor(0xFF000000.toInt())
+            try {
+                w.settings.javaScriptEnabled = true
+                w.settings.domStorageEnabled = true
+                w.settings.mediaPlaybackRequiresUserGesture = false
+                w.settings.useWideViewPort = true
+                w.settings.loadWithOverviewMode = true
+                val ua = android.webkit.WebSettings.getDefaultUserAgent(this)
+                if (!ua.isNullOrBlank()) w.settings.userAgentString = ua
+            } catch (t: Throwable) { fail("webSettings", t) }
+            w.webChromeClient = android.webkit.WebChromeClient()
+            w.webViewClient = android.webkit.WebViewClient()
+            web = w
+            root?.addView(w, FrameLayout.LayoutParams(-1, -1))
+            w.loadDataWithBaseURL("https://yaartera01234-web.github.io/", webHtml(url), "text/html", "utf-8", null)
+            setStatus("v36 \u2022 webview player (page jaisa)")
+            /* aspect button ko shuru me fit kar do */
+            w.postDelayed({ webAspect() }, 800)
+        } catch (t: Throwable) {
+            fail("webView", t)
+        }
+    }
+
+    private fun webHtml(u: String): String {
+        val src = org.json.JSONObject.quote(u)
+        return """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+video{width:100%;height:100%;object-fit:contain;background:#000;outline:none}
+#b{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:76px;height:76px;border-radius:50%;
+background:linear-gradient(135deg,#ff5ebc,#8b72ff);display:none;place-items:center;font-size:32px;color:#fff;z-index:9;
+box-shadow:0 10px 30px rgba(0,0,0,.5)}</style></head>
+<body><video id="v" playsinline controls autoplay preload="metadata"></video><div id="b">&#9654;</div>
+<script>
+var v=document.getElementById('v'), b=document.getElementById('b');
+v.src=""" + src + """;
+window.pvAspect=function(m){ v.style.objectFit=(m==='zoom'?'cover':(m==='fill'?'fill':'contain')); };
+window.pvBright=function(x){ v.style.filter='brightness('+x+')'; };
+window.pvPlay=function(){ try{ v.play(); }catch(e){} };
+try{ v.volume=1; v.play(); }catch(e){}
+setTimeout(function(){ if(v.paused){ b.style.display='grid'; } },1500);
+b.onclick=function(){ try{ v.play(); }catch(e){} b.style.display='none'; };
+v.addEventListener('playing',function(){ b.style.display='none'; });
+v.addEventListener('error',function(){ try{ document.title='ERR'; }catch(e){} });
+</script></body></html>"""
+    }
+
+    private fun webAspect() {
+        val m = when (modeIdx) { 0 -> "fit"; 1 -> "fill"; else -> "zoom" }
+        try { web?.evaluateJavascript("window.pvAspect && window.pvAspect('" + m + "')", null) } catch (t: Throwable) {}
     }
 
     private fun logLine(msg: String) {
@@ -662,7 +735,7 @@ class PlayerActivity : Activity() {
                     textSize = 11.5f
                     setPadding(dp(14), dp(14), dp(14), dp(14))
                     setBackgroundColor(0xF0100A1E.toInt())
-                    text = "NATIVE PLAYER \u2014 v35 error\n" + stepErrs.toString().take(900) + "\n\n(koi bhi jagah tap = yeh hata do)"
+                    text = "NATIVE PLAYER \u2014 v36 error\n" + stepErrs.toString().take(900) + "\n\n(koi bhi jagah tap = yeh hata do)"
                     setOnClickListener { visibility = View.GONE }
                 }
                 errText = t
@@ -699,6 +772,11 @@ class PlayerActivity : Activity() {
             }
         } catch (t: Throwable) {}
         localPlayer = null
+        try {
+            web?.stopLoading()
+            web?.destroy()
+        } catch (t: Throwable) {}
+        web = null
         super.onDestroy()
     }
 }
