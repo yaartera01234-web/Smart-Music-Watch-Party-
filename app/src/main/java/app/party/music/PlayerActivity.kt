@@ -19,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -153,16 +154,23 @@ class PlayerActivity : Activity() {
                 val c = f.get()
                 controller = c
                 playerView.player = c
-                val item = MediaItem.Builder()
+                /* v28: m3u8/mpd ka hint — warna bina extension wale links fail hote hain */
+                val lower = url.lowercase()
+                val mb = MediaItem.Builder()
                     .setUri(url)
                     .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
-                    .build()
+                if (lower.contains(".m3u8")) mb.setMimeType(MimeTypes.APPLICATION_M3U8)
+                else if (lower.contains(".mpd")) mb.setMimeType(MimeTypes.APPLICATION_MPD)
+                val item = mb.build()
                 c.setMediaItem(item, pos)
                 c.prepare()
                 c.play()
                 c.addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
-                        showNote("\u26a0\ufe0f Ye link native player me nahi chala \u2014 page wale player se try karo")
+                        showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
+                        try {
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish() }, 2400)
+                        } catch (t: Throwable) {}
                     }
                 })
             } catch (t: Throwable) {
