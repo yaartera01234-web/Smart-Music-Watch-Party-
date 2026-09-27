@@ -212,7 +212,7 @@ class PlayerActivity : Activity() {
                         val nv = (gStartVol + pct * maxVol).roundToInt().coerceIn(0, maxVol)
                         try { am.setStreamVolume(AudioManager.STREAM_MUSIC, nv, 0) } catch (e: Throwable) {}
                         val percent = ((nv * 100f) / maxVol).roundToInt()
-                        showHud("\U0001f50a", percent, "$nv/$maxVol")
+                        showHud("\uD83D\uDD0A", percent, "$nv/$maxVol")
                     }
                     return true
                 }
