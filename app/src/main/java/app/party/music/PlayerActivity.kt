@@ -51,6 +51,7 @@ import kotlin.math.roundToInt
  * v32: HAR STEP apna try/catch — koi ek cheez fail ho to native phir bhi khule.
  *      + MediaController (background/notification) fail ho to LOCAL ExoPlayer fallback.
  *      + error poori screen pe (tap = hatao) aur crash.txt me (agle launch pe banner).
+ * v34: DO-player bug fix (grace 2.6s + local release) + status line + saaf error screen.
  * v33: immersive() ab setContentView ke BAAD (wahi NPE tha jo app girata tha) + telemetry.
  *
  *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS
@@ -67,6 +68,7 @@ class PlayerActivity : Activity() {
     private var started = false
 
     private var root: FrameLayout? = null
+    private var status2: TextView? = null
     private var note: TextView? = null
     private var errText: TextView? = null
     private var pv: PlayerView? = null
@@ -212,6 +214,22 @@ class PlayerActivity : Activity() {
             r.addView(l, FrameLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER })
         }
 
+        step("status2") {
+            val t = TextView(this).apply {
+                textSize = 10.5f
+                setTextColor(0xFFBFF3FF.toInt())
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                setBackgroundColor(0x99000000.toInt())
+                text = "v34 \u2022 starting\u2026"
+            }
+            status2 = t
+            r.addView(t, FrameLayout.LayoutParams(-2, -2).apply {
+                gravity = Gravity.BOTTOM or Gravity.START
+                leftMargin = dp(12)
+                bottomMargin = dp(12)
+            })
+        }
+
         step("show") { setContentView(r) }
         /* v33 FIX: fullscreen sirf content lagne ke BAAD (pehle decor view null hota hai -> NPE) */
         step("immersive") { immersive() }
@@ -223,7 +241,15 @@ class PlayerActivity : Activity() {
 
         /* 1) MediaController (background play + notification). Fail ho to 2) local player. */
         val ok = step("session") { startController(url, title, pos) }
-        if (!ok || !started) startLocalIfNeeded(url, title, pos)
+        if (ok) {
+            /* v34 FIX: controller ko connect hone ka waqt do (2.6s).
+               Pehle hum foran local player bhi chala dete the -> DO player ek sath
+               (aawaz double / video black / foran error -> screen band). */
+            android.os.Handler(android.os.Looper.getMainLooper())
+                .postDelayed({ if (!started) startLocalIfNeeded(url, title, pos) }, 2600)
+        } else {
+            startLocalIfNeeded(url, title, pos)
+        }
 
         if (stepErrs.isNotEmpty()) showErrPanel()
     }
@@ -255,8 +281,14 @@ class PlayerActivity : Activity() {
         f.addListener({
             try {
                 val c = f.get()
+                if (localMode) {           /* v34: local fallback chal raha tha -> band karo, warna double aawaz */
+                    try { localPlayer?.release() } catch (t: Throwable) {}
+                    localPlayer = null
+                    localMode = false
+                }
                 controller = c
                 started = true
+                setStatus("v34 \u2022 controller OK")
                 attach(c)
                 c.setMediaItem(mediaItem(url, title), pos)
                 c.prepare()
@@ -264,13 +296,12 @@ class PlayerActivity : Activity() {
                 logLine("session OK \u2014 playing")
                 c.addListener(object : Player.Listener {
                     override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
-                    override fun onPlaybackStateChanged(state: Int) { logLine("state " + state) }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        logLine("state " + state)
+                        setStatus("v34 \u2022 controller \u2022 state " + state)
+                    }
                     override fun onPlayerError(error: PlaybackException) {
-                        logLine("playerError " + error.errorCode + " " + error.errorCodeName + ": " + error.message)
-                        showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
-                        try {
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish() }, 2400)
-                        } catch (t: Throwable) {}
+                        showPlayErr(error.errorCode + " " + error.errorCodeName)
                     }
                 })
             } catch (t: Throwable) {
@@ -329,15 +360,15 @@ class PlayerActivity : Activity() {
         p.prepare()
         p.play()
         logLine("local OK \u2014 playing")
+        setStatus("v34 \u2022 local player OK")
         p.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
-            override fun onPlaybackStateChanged(state: Int) { logLine("local state " + state) }
+            override fun onPlaybackStateChanged(state: Int) {
+                logLine("local state " + state)
+                setStatus("v34 \u2022 local \u2022 state " + state)
+            }
             override fun onPlayerError(error: PlaybackException) {
-                logLine("local playerError " + error.errorCode + " " + error.errorCodeName + ": " + error.message)
-                showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
-                try {
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish() }, 2400)
-                } catch (t: Throwable) {}
+                showPlayErr(error.errorCode + " " + error.errorCodeName)
             }
         })
     }
@@ -536,6 +567,36 @@ class PlayerActivity : Activity() {
     }
 
     /* ---------------- error reporting (v32/v33) ---------------- */
+
+    private fun setStatus(msg: String) {
+        runOnUiThread {
+            try {
+                status2?.text = msg
+                status2?.visibility = View.VISIBLE
+            } catch (t: Throwable) {}
+        }
+    }
+
+    /** v34: playback fail hone pe screen pe saaf wajah + tap = page player (khud se band nahi hoti). */
+    private fun showPlayErr(why: String) {
+        logLine("playFail " + why)
+        runOnUiThread {
+            try {
+                setStatus("v34 \u2022 FAIL: " + why)
+                val t = TextView(this).apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 12.5f
+                    setPadding(dp(14), dp(14), dp(14), dp(14))
+                    setBackgroundColor(0xF01A0B18.toInt())
+                    text = "\u26a0\ufe0f Native player ye link nahi chala\n" + why + "\n\n(Tap karo = page wala player)"
+                    isClickable = true
+                    setOnClickListener { finish() }
+                }
+                root?.addView(t, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.CENTER })
+                t.postDelayed({ try { finish() } catch (e: Throwable) {} }, 10000)
+            } catch (e: Throwable) {}
+        }
+    }
 
     private fun logLine(msg: String) {
         try {
