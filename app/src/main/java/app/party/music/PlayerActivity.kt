@@ -17,11 +17,14 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -50,6 +53,7 @@ class PlayerActivity : Activity() {
     private var pv: PlayerView? = null
     private var modeBtn: TextView? = null
 
+    private var audioBtn: TextView? = null
     private var hud: LinearLayout? = null
     private var hudText: TextView? = null
     private var hudBar: ProgressBar? = null
@@ -118,6 +122,21 @@ class PlayerActivity : Activity() {
             rightMargin = dp(16)
         })
 
+        /* ---- v29: DUAL AUDIO (audio track switch) ---- */
+        audioBtn = TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFFFFFFFF.toInt())
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundColor(0x99000000.toInt())
+            text = "\uD83D\uDD0A  Audio"
+            setOnClickListener { cycleAudio() }
+        }
+        root.addView(audioBtn, FrameLayout.LayoutParams(-2, -2).apply {
+            gravity = Gravity.TOP or Gravity.START
+            topMargin = dp(16)
+            leftMargin = dp(16)
+        })
+
         /* ---- HUD (brightness / volume indicator) ---- */
         hudText = TextView(this).apply {
             setTextColor(0xFFFFFFFF.toInt())
@@ -166,6 +185,7 @@ class PlayerActivity : Activity() {
                 c.prepare()
                 c.play()
                 c.addListener(object : Player.Listener {
+                    override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
                     override fun onPlayerError(error: PlaybackException) {
                         showNote("\u26a0\ufe0f Ye link native me nahi chala \u2014 2 second me page wala player khul raha hai")
                         try {
@@ -177,6 +197,56 @@ class PlayerActivity : Activity() {
                 showNote("\u26a0\ufe0f Player start nahi hua")
             }
         }, MoreExecutors.directExecutor())
+    }
+
+    /* ---------------- v29: dual audio (track switch) ---------------- */
+
+    private fun audioList(p: Player): MutableList<Pair<androidx.media3.common.TrackGroup, Int>> {
+        val out = ArrayList<Pair<androidx.media3.common.TrackGroup, Int>>()
+        try {
+            for (g in p.currentTracks.groups) {
+                if (g.type != C.TRACK_TYPE_AUDIO) continue
+                for (i in 0 until g.length) out.add(g.mediaTrackGroup to i)
+            }
+        } catch (t: Throwable) {}
+        return out
+    }
+
+    private fun audioCur(p: Player): Int {
+        try {
+            var k = 0
+            for (g in p.currentTracks.groups) {
+                if (g.type != C.TRACK_TYPE_AUDIO) continue
+                for (i in 0 until g.length) {
+                    if (g.isTrackSelected(i)) return k
+                    k++
+                }
+            }
+        } catch (t: Throwable) {}
+        return -1
+    }
+
+    private fun refreshAudioBtn() {
+        val p = controller ?: return
+        val list = audioList(p); val idx = audioCur(p)
+        val b = audioBtn ?: return
+        b.text = if (list.size > 1) "\uD83D\uDD0A  " + (idx + 1).coerceAtLeast(1) + "/" + list.size else "\uD83D\uDD0A  Audio"
+    }
+
+    private fun cycleAudio() {
+        val p = controller ?: return
+        val list = audioList(p)
+        if (list.size <= 1) { showNote("\u26a0\ufe0f Is video me sirf ek hi audio hai"); return }
+        val cur = audioCur(p)
+        val nxt = ((cur + 1) % list.size + list.size) % list.size
+        val pair = list[nxt]
+        try {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setOverrideForType(TrackSelectionOverride(pair.first, pair.second))
+                .build()
+        } catch (t: Throwable) {}
+        refreshAudioBtn()
+        showHud("\uD83D\uDD0A", (nxt + 1) * 100 / list.size, "Audio " + (nxt + 1) + "/" + list.size)
     }
 
     /* ---------------- crop mode ---------------- */
