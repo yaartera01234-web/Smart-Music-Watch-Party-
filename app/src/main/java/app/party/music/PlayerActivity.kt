@@ -55,6 +55,7 @@ class PlayerActivity : Activity() {
 
     private lateinit var am: AudioManager
     private lateinit var prefs: SharedPreferences
+    private val hideRunnable = Runnable { hud?.visibility = View.GONE }
     private var maxVol = 15
 
     private val modes = intArrayOf(
@@ -250,12 +251,12 @@ class PlayerActivity : Activity() {
             hudText?.text = "$icon  $label"
             hudBar?.progress = percent.coerceIn(0, 100)
             hud?.visibility = View.VISIBLE
-            hud?.removeCallbacksAndMessages(null)
+            hud?.removeCallbacks(hideRunnable)
         }
     }
 
     private fun hideHudLater() {
-        hud?.postDelayed({ hud?.visibility = View.GONE }, 900)
+        hud?.postDelayed(hideRunnable, 900)
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).roundToInt()
