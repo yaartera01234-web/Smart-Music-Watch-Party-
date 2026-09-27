@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
  * v32: HAR STEP apna try/catch — koi ek cheez fail ho to native phir bhi khule.
  *      + MediaController (background/notification) fail ho to LOCAL ExoPlayer fallback.
  *      + error poori screen pe (tap = hatao) aur crash.txt me (agle launch pe banner).
- * v34: DO-player bug fix (grace 2.6s + local release) + status line + saaf error screen.
+ * v35: DO-player bug fix (grace 2.6s + local release) + status line + saaf error screen.
  * v33: immersive() ab setContentView ke BAAD (wahi NPE tha jo app girata tha) + telemetry.
  *
  *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS
@@ -66,6 +66,10 @@ class PlayerActivity : Activity() {
     private var localPlayer: ExoPlayer? = null
     private var localMode = false
     private var started = false
+    private var curUrl = ""
+    private var curTitle = "Video"
+    private var altUrl: String? = null
+    private var altTried = false
 
     private var root: FrameLayout? = null
     private var status2: TextView? = null
@@ -220,7 +224,7 @@ class PlayerActivity : Activity() {
                 setTextColor(0xFFBFF3FF.toInt())
                 setPadding(dp(8), dp(4), dp(8), dp(4))
                 setBackgroundColor(0x99000000.toInt())
-                text = "v34 \u2022 starting\u2026"
+                text = "v35 \u2022 starting\u2026"
             }
             status2 = t
             r.addView(t, FrameLayout.LayoutParams(-2, -2).apply {
@@ -234,15 +238,18 @@ class PlayerActivity : Activity() {
         /* v33 FIX: fullscreen sirf content lagne ke BAAD (pehle decor view null hota hai -> NPE) */
         step("immersive") { immersive() }
 
+        altUrl = try { intent.getStringExtra("alt") } catch (t: Throwable) { null }
         val url = try { intent.getStringExtra("url") } catch (t: Throwable) { null }
         val title = try { intent.getStringExtra("title") } catch (t: Throwable) { null } ?: "Video"
         val pos = try { intent.getLongExtra("pos", 0L) } catch (t: Throwable) { 0L }
         if (url.isNullOrBlank()) { finish(); return }
+        curUrl = url
+        curTitle = title
 
         /* 1) MediaController (background play + notification). Fail ho to 2) local player. */
         val ok = step("session") { startController(url, title, pos) }
         if (ok) {
-            /* v34 FIX: controller ko connect hone ka waqt do (2.6s).
+            /* v35 FIX: controller ko connect hone ka waqt do (2.6s).
                Pehle hum foran local player bhi chala dete the -> DO player ek sath
                (aawaz double / video black / foran error -> screen band). */
             android.os.Handler(android.os.Looper.getMainLooper())
@@ -281,14 +288,14 @@ class PlayerActivity : Activity() {
         f.addListener({
             try {
                 val c = f.get()
-                if (localMode) {           /* v34: local fallback chal raha tha -> band karo, warna double aawaz */
+                if (localMode) {           /* v35: local fallback chal raha tha -> band karo, warna double aawaz */
                     try { localPlayer?.release() } catch (t: Throwable) {}
                     localPlayer = null
                     localMode = false
                 }
                 controller = c
                 started = true
-                setStatus("v34 \u2022 controller OK")
+                setStatus("v35 \u2022 controller OK")
                 attach(c)
                 c.setMediaItem(mediaItem(url, title), pos)
                 c.prepare()
@@ -298,7 +305,7 @@ class PlayerActivity : Activity() {
                     override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
                     override fun onPlaybackStateChanged(state: Int) {
                         logLine("state " + state)
-                        setStatus("v34 \u2022 controller \u2022 state " + state)
+                        setStatus("v35 \u2022 controller \u2022 state " + state)
                     }
                     override fun onPlayerError(error: PlaybackException) {
                         showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
@@ -360,12 +367,12 @@ class PlayerActivity : Activity() {
         p.prepare()
         p.play()
         logLine("local OK \u2014 playing")
-        setStatus("v34 \u2022 local player OK")
+        setStatus("v35 \u2022 local player OK")
         p.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
             override fun onPlaybackStateChanged(state: Int) {
                 logLine("local state " + state)
-                setStatus("v34 \u2022 local \u2022 state " + state)
+                setStatus("v35 \u2022 local \u2022 state " + state)
             }
             override fun onPlayerError(error: PlaybackException) {
                 showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
@@ -577,12 +584,30 @@ class PlayerActivity : Activity() {
         }
     }
 
-    /** v34: playback fail hone pe screen pe saaf wajah + tap = page player (khud se band nahi hoti). */
+    /** v35: playback fail hone pe screen pe saaf wajah + tap = page player (khud se band nahi hoti). */
     private fun showPlayErr(why: String) {
         logLine("playFail " + why)
+        /* v35: pehla link nahi chala? doosra link khud try karo (self-test / mirror links) */
+        val a = altUrl
+        if (!altTried && !a.isNullOrBlank()) {
+            altTried = true
+            val p = cur()
+            if (p != null) {
+                try {
+                    logLine("trying ALT url")
+                    setStatus("v35 \u2022 alt link try ho raha hai\u2026")
+                    p.setMediaItem(mediaItem(a, curTitle))
+                    p.prepare()
+                    p.play()
+                    return
+                } catch (t: Throwable) {
+                    fail("altTry", t)
+                }
+            }
+        }
         runOnUiThread {
             try {
-                setStatus("v34 \u2022 FAIL: " + why)
+                setStatus("v35 \u2022 FAIL: " + why)
                 val t = TextView(this).apply {
                     setTextColor(0xFFFFFFFF.toInt())
                     textSize = 12.5f
@@ -637,7 +662,7 @@ class PlayerActivity : Activity() {
                     textSize = 11.5f
                     setPadding(dp(14), dp(14), dp(14), dp(14))
                     setBackgroundColor(0xF0100A1E.toInt())
-                    text = "NATIVE PLAYER \u2014 v32 error\n" + stepErrs.toString().take(900) + "\n\n(koi bhi jagah tap = yeh hata do)"
+                    text = "NATIVE PLAYER \u2014 v35 error\n" + stepErrs.toString().take(900) + "\n\n(koi bhi jagah tap = yeh hata do)"
                     setOnClickListener { visibility = View.GONE }
                 }
                 errText = t
