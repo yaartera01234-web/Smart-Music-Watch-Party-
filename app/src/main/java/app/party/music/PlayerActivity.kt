@@ -81,6 +81,18 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        /* v31: poora setup try me — koi bhi error app ko crash na kare */
+        try {
+            buildUi()
+        } catch (t: Throwable) {
+            try {
+                Toast.makeText(this, "\u26a0\ufe0f Native player nahi khula: " + (t.message ?: t.javaClass.simpleName), Toast.LENGTH_LONG).show()
+            } catch (e: Throwable) {}
+            finish()
+        }
+    }
+
+    private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         immersive()
 
