@@ -67,6 +67,7 @@ class MainActivity : Activity() {
     /* v30: native player ka apna (Android) button + auto-detect — page ke JS pe bharosa nahi */
     private var nBtn: TextView? = null
     private var lastAutoUrl = ""
+    private var lastCrashShown = ""
 
     /* v27: app background/band hone pe DM notifications ke liye chhupa WebView service */
     private val bgHandler = Handler(Looper.getMainLooper())
@@ -351,7 +352,7 @@ class MainActivity : Activity() {
             fun notify(title: String?, text: String?) { postNote(title, text) }
 
             @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 31
+            fun appVersion(): Int = 32
         }, "YaarNative")
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
@@ -380,6 +381,25 @@ class MainActivity : Activity() {
                 showBanner("🎤 Mic ki ijazat nahi mili — voice message ke liye Allow karein")
             }
         }
+    }
+
+    /* v32: native player me jo error aayi thi uski POORI detail yahan (tap karne tak ruke) */
+    private fun showNativeError() {
+        try {
+            val f = getFileStreamPath("crash.txt")
+            if (!f.exists()) return
+            val txt = f.readText()
+            if (txt.isBlank() || txt == lastCrashShown) return
+            lastCrashShown = txt
+            if (!::status.isInitialized) return
+            status.text = "\u26a0\ufe0f NATIVE PLAYER ERROR (tap = hatao):\n" + txt.take(1400)
+            status.visibility = View.VISIBLE
+            status.isClickable = true
+            status.setOnClickListener {
+                status.visibility = View.GONE
+                runCatching { getFileStreamPath("crash.txt").delete() }
+            }
+        } catch (t: Throwable) {}
     }
 
     private fun showBanner(message: String) {
@@ -443,6 +463,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         web.onResume()
+        showNativeError()
     }
 
     override fun onPause() {
