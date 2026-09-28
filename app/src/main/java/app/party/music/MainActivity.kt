@@ -334,13 +334,7 @@ class MainActivity : Activity() {
             /* v40: notification me "Reply" button -> jawab isi WebView ke page se jayega */
             @android.webkit.JavascriptInterface
             fun notifyFrom(title: String?, text: String?, code: String?) {
-                NotifHub.setReplyTarget { c, t, requestId ->
-                    web.post {
-                        try { web.evaluateJavascript(NotifHub.quickReplyJs(requestId, c, t), null) } catch (e: Throwable) {
-                            NotifHub.completeReply(requestId, false)
-                        }
-                    }
-                }
+                registerForegroundReplyTarget()
                 postNote(title, text, code)
             }
 
@@ -357,8 +351,18 @@ class MainActivity : Activity() {
             fun resetCallAudioRoute() { this@MainActivity.resetCallAudioRoute() }
 
             @android.webkit.JavascriptInterface
+            fun startOngoingCall(): Boolean {
+                return try { CallForegroundService.start(this@MainActivity); true }
+                catch (t: Throwable) { Log.e("MusicParty", "call foreground service start failed", t); false }
+            }
+
+            @android.webkit.JavascriptInterface
+            fun stopOngoingCall() { CallForegroundService.stop(this@MainActivity) }
+
+            @android.webkit.JavascriptInterface
             fun appVersion(): Int = 41
         }, "YaarNative")
+        registerForegroundReplyTarget()
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
         web.onGif = { gifUrl ->
@@ -371,6 +375,18 @@ class MainActivity : Activity() {
         // Har launch pe naya query lagane se page TAZA aata hai, warna naye fixes app me
         // dikhte hi nahi (assets/libs cache me rehte hain, sirf ~100KB page dobara aata hai).
         web.loadUrl(url + "?v=" + System.currentTimeMillis())
+    }
+
+    private fun registerForegroundReplyTarget() {
+        try {
+            NotifHub.setReplyTarget("fg") { code, text, requestId ->
+                web.post {
+                    try { web.evaluateJavascript(NotifHub.quickReplyJs(requestId, code, text), null) } catch (t: Throwable) {
+                        NotifHub.completeReply(requestId, false)
+                    }
+                }
+            }
+        } catch (t: Throwable) { Log.e("MusicParty", "foreground reply target registration failed", t) }
     }
 
     @Suppress("DEPRECATION")
@@ -525,7 +541,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
-        resetCallAudioRoute() // v44: route restore safety; voice calls are foreground-only
+        if (!CallForegroundService.running) resetCallAudioRoute()
         try { bgHandler.removeCallbacks(stopBgIfForeground) } catch (t: Throwable) {}
         web.onResume()
         web.resumeTimers()
@@ -617,7 +633,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        try { NotifHub.setReplyTarget(null) } catch (t: Throwable) {}
+        try { NotifHub.setReplyTarget("fg", null) } catch (t: Throwable) {}
         super.onDestroy()
     }
 

@@ -23,6 +23,7 @@ class ReplyReceiver : BroadcastReceiver() {
         try {
             if (NotifHub.ACTION_REPLY != intent.action) return
             val code = intent.getStringExtra("code") ?: ""
+            val source = intent.getStringExtra("source") ?: ""
             val nid = intent.getIntExtra("nid", 0)
             val text = readText(intent)?.trim() ?: ""
             if (code.isEmpty() || text.isEmpty()) {
@@ -33,7 +34,7 @@ class ReplyReceiver : BroadcastReceiver() {
             val requestId = UUID.randomUUID().toString()
             async = goAsync()
             val pending = async
-            val dispatched = NotifHub.deliverReply(code, text, requestId) { sent ->
+            val dispatched = NotifHub.deliverReply(source, code, text, requestId) { sent ->
                 try {
                     if (sent) {
                         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(nid)

@@ -36,16 +36,17 @@ object NotifHub {
     private var lastKey = ""
     private var lastTs = 0L
 
-    /** v44: current page ko reply bhejo; result async native callback se wapas aata hai. */
-    @Volatile
-    private var replyFn: ((String, String, String) -> Unit)? = null
+    /** v45: foreground Activity aur background WebView ke reply targets alag rakho. */
+    private val replyFns = ConcurrentHashMap<String, (String, String, String) -> Unit>()
     private val pendingReplies = ConcurrentHashMap<String, (Boolean) -> Unit>()
 
-    fun setReplyTarget(fn: ((String, String, String) -> Unit)?) { replyFn = fn }
+    fun setReplyTarget(source: String, fn: ((String, String, String) -> Unit)?) {
+        if (fn == null) replyFns.remove(source) else replyFns[source] = fn
+    }
 
-    /** ReplyReceiver se aaya text WebView tak dispatch karo; send ka ACK baad me aata hai. */
-    fun deliverReply(code: String, text: String, requestId: String, completion: (Boolean) -> Unit): Boolean {
-        val f = replyFn ?: return false
+    /** Notification ke source WebView ko pehle try karo; purane notif par doosra live host fallback hai. */
+    fun deliverReply(source: String, code: String, text: String, requestId: String, completion: (Boolean) -> Unit): Boolean {
+        val f = replyFns[source] ?: replyFns.values.firstOrNull() ?: return false
         pendingReplies[requestId] = completion
         return try {
             f(code, text, requestId)
@@ -118,11 +119,12 @@ object NotifHub {
      * Har peer ka apna request code (=notification id) hai, warna ek peer ka reply
      * doosre ke paas chala jata.
      */
-    private fun replyIntent(ctx: Context, peer: String, nid: Int): PendingIntent {
+    private fun replyIntent(ctx: Context, peer: String, nid: Int, source: String): PendingIntent {
         val i = Intent(ctx, ReplyReceiver::class.java)
             .setAction(ACTION_REPLY)
             .putExtra("code", peer)
             .putExtra("nid", nid)
+            .putExtra("source", source)
         val flags = if (Build.VERSION.SDK_INT >= 31)
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         else PendingIntent.FLAG_UPDATE_CURRENT
@@ -156,7 +158,7 @@ object NotifHub {
                 try {
                     val ri = RemoteInput.Builder(REPLY_KEY).setLabel("Reply likho…").build()
                     @Suppress("DEPRECATION")
-                    val act = Notification.Action.Builder(R.drawable.app_icon, "Reply", replyIntent(ctx, peer!!, nid))
+                    val act = Notification.Action.Builder(R.drawable.app_icon, "Reply", replyIntent(ctx, peer!!, nid, src))
                         .addRemoteInput(ri)
                         .setAllowGeneratedReplies(true)
                         .build()

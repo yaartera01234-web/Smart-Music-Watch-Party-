@@ -158,7 +158,7 @@ class BgNotifyService : Service() {
         @android.webkit.JavascriptInterface
         fun notifyFrom(title: String?, text: String?, code: String?) {
             lastPing = System.currentTimeMillis()
-            NotifHub.setReplyTarget { c, t, requestId ->
+            NotifHub.setReplyTarget("bg") { c, t, requestId ->
                 web?.post {
                     try { web?.evaluateJavascript(NotifHub.quickReplyJs(requestId, c, t), null) } catch (e: Throwable) {
                         NotifHub.completeReply(requestId, false)
@@ -227,7 +227,7 @@ class BgNotifyService : Service() {
     override fun onDestroy() {
         running = false
         foregroundReady = false
-        try { NotifHub.setReplyTarget(null) } catch (t: Throwable) {}
+        try { NotifHub.setReplyTarget("bg", null) } catch (t: Throwable) {}
         try { handler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
         try {
             web?.stopLoading()
