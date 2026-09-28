@@ -110,7 +110,7 @@ class CallForegroundService : Service() {
             .setVisibility(Notification.VISIBILITY_PRIVATE)
         builder.addAction(R.drawable.app_icon, "Return to call", openPending)
         if (Build.VERSION.SDK_INT >= 21) builder.setColor(0xFF8B72FF.toInt())
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) builder.priority = Notification.PRIORITY_LOW
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) builder.setPriority(Notification.PRIORITY_LOW)
         return builder.build()
     }
 
