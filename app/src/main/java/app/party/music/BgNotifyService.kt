@@ -158,12 +158,19 @@ class BgNotifyService : Service() {
         @android.webkit.JavascriptInterface
         fun notifyFrom(title: String?, text: String?, code: String?) {
             lastPing = System.currentTimeMillis()
-            NotifHub.setReplyTarget { c, t ->
+            NotifHub.setReplyTarget { c, t, requestId ->
                 web?.post {
-                    try { web?.evaluateJavascript(NotifHub.quickReplyJs(c, t), null) } catch (e: Throwable) {}
+                    try { web?.evaluateJavascript(NotifHub.quickReplyJs(requestId, c, t), null) } catch (e: Throwable) {
+                        NotifHub.completeReply(requestId, false)
+                    }
                 }
             }
             NotifHub.post(this@BgNotifyService, title, text, "bg", code)
+        }
+
+        @android.webkit.JavascriptInterface
+        fun replyResult(requestId: String?, sent: Boolean) {
+            if (!requestId.isNullOrEmpty()) NotifHub.completeReply(requestId, sent)
         }
 
         @android.webkit.JavascriptInterface

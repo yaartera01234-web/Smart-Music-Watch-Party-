@@ -12,6 +12,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -63,6 +65,10 @@ class MainActivity : Activity() {
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
     private var pendingWebPerm: PermissionRequest? = null
     private var resumed = false
+    private var callAudioActive = false
+    private var callOriginalMode = AudioManager.MODE_NORMAL
+    private var callOriginalSpeaker = false
+    private var callOriginalDevice: AudioDeviceInfo? = null
 
     /* v30: native player ka apna (Android) button + auto-detect — page ke JS pe bharosa nahi */
     private var nBtn: TextView? = null
@@ -328,13 +334,27 @@ class MainActivity : Activity() {
             /* v40: notification me "Reply" button -> jawab isi WebView ke page se jayega */
             @android.webkit.JavascriptInterface
             fun notifyFrom(title: String?, text: String?, code: String?) {
-                NotifHub.setReplyTarget { c, t ->
+                NotifHub.setReplyTarget { c, t, requestId ->
                     web.post {
-                        try { web.evaluateJavascript(NotifHub.quickReplyJs(c, t), null) } catch (e: Throwable) {}
+                        try { web.evaluateJavascript(NotifHub.quickReplyJs(requestId, c, t), null) } catch (e: Throwable) {
+                            NotifHub.completeReply(requestId, false)
+                        }
                     }
                 }
                 postNote(title, text, code)
             }
+
+            @android.webkit.JavascriptInterface
+            fun replyResult(requestId: String?, sent: Boolean) {
+                if (!requestId.isNullOrEmpty()) NotifHub.completeReply(requestId, sent)
+            }
+
+            /* v44: WebRTC call ke liye earpiece / speaker route (foreground only). */
+            @android.webkit.JavascriptInterface
+            fun setCallAudioRoute(speaker: Boolean) { this@MainActivity.setCallAudioRoute(speaker) }
+
+            @android.webkit.JavascriptInterface
+            fun resetCallAudioRoute() { this@MainActivity.resetCallAudioRoute() }
 
             @android.webkit.JavascriptInterface
             fun appVersion(): Int = 41
@@ -351,6 +371,62 @@ class MainActivity : Activity() {
         // Har launch pe naya query lagane se page TAZA aata hai, warna naye fixes app me
         // dikhte hi nahi (assets/libs cache me rehte hain, sirf ~100KB page dobara aata hai).
         web.loadUrl(url + "?v=" + System.currentTimeMillis())
+    }
+
+    @Suppress("DEPRECATION")
+    private fun setCallAudioRoute(speaker: Boolean) {
+        runOnUiThread {
+            try {
+                val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                if (!callAudioActive) {
+                    callOriginalMode = audio.mode
+                    callOriginalSpeaker = audio.isSpeakerphoneOn
+                    callOriginalDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audio.communicationDevice else null
+                    callAudioActive = true
+                }
+                audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val devices = audio.availableCommunicationDevices
+                    val target = if (speaker) {
+                        devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    } else {
+                        callOriginalDevice?.takeIf { old -> old.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER && devices.any { it.id == old.id } }
+                            ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                    }
+                    if (target != null) audio.setCommunicationDevice(target)
+                    else if (speaker) audio.isSpeakerphoneOn = true
+                    else audio.clearCommunicationDevice()
+                } else {
+                    audio.isSpeakerphoneOn = speaker
+                }
+            } catch (t: Throwable) {
+                Log.w("MusicParty", "call audio route failed", t)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun resetCallAudioRoute() {
+        val restore = Runnable {
+            if (!callAudioActive) return@Runnable
+            try {
+                val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val devices = audio.availableCommunicationDevices
+                    val original = callOriginalDevice
+                    if (original != null && devices.any { it.id == original.id }) audio.setCommunicationDevice(original)
+                    else audio.clearCommunicationDevice()
+                }
+                audio.isSpeakerphoneOn = callOriginalSpeaker
+                audio.mode = callOriginalMode
+            } catch (t: Throwable) {
+                Log.w("MusicParty", "call audio restore failed", t)
+            } finally {
+                callAudioActive = false
+                callOriginalDevice = null
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) restore.run() else runOnUiThread(restore)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -449,6 +525,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        resetCallAudioRoute() // v44: route restore safety; voice calls are foreground-only
         try { bgHandler.removeCallbacks(stopBgIfForeground) } catch (t: Throwable) {}
         web.onResume()
         web.resumeTimers()

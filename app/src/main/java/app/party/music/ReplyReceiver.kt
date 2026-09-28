@@ -6,37 +6,57 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import java.util.UUID
 
 /**
- * v40: notification ke "Reply" button ka natija.
- *
- * WhatsApp jaisa inline reply: user notification me hi likh kar bhejta hai,
- * Android woh text is receiver ko deta hai. Text page (WebView) ko bhejna parta hai
- * kyunke E2E encryption sirf page ke JS me hai — page encrypt karke MQTT pe chhod deta hai.
- *
- * Agar page zinda na mile (service band / force-stop) to chhoti notification:
- * "App khol ke dobara bhejein".
+ * v44: notification reply tabhi delivered maano jab page E2E encrypt karke
+ * MQTT broker ka PUBACK le aaye. Is se notification ko false success pe dismiss nahi karte.
  */
 class ReplyReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context?, intent: Intent?) {
         if (ctx == null || intent == null) return
+        var async: BroadcastReceiver.PendingResult? = null
         try {
             if (NotifHub.ACTION_REPLY != intent.action) return
             val code = intent.getStringExtra("code") ?: ""
             val nid = intent.getIntExtra("nid", 0)
-            val text = readText(intent) ?: ""
-            val ok = code.isNotEmpty() && text.isNotEmpty() && NotifHub.deliverReply(code, text)
-            if (ok) {
-                try {
-                    (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(nid)
-                } catch (t: Throwable) {}
-            } else {
-                NotifHub.post(ctx, "\u26A0\uFE0F Reply nahi gaya", "App khol ke dobara bhejein", "reply-fail")
+            val text = readText(intent)?.trim() ?: ""
+            if (code.isEmpty() || text.isEmpty()) {
+                NotifHub.post(ctx, "⚠️ Reply nahi gaya", "App khol ke dobara bhejein", "reply-fail")
+                return
             }
+
+            val requestId = UUID.randomUUID().toString()
+            async = goAsync()
+            val pending = async
+            val dispatched = NotifHub.deliverReply(code, text, requestId) { sent ->
+                try {
+                    if (sent) {
+                        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(nid)
+                    } else {
+                        NotifHub.post(ctx, "⚠️ Reply nahi gaya", "App khol ke dobara bhejein", "reply-fail")
+                    }
+                } catch (t: Throwable) {
+                    Log.e("MusicParty", "reply result handling fail", t)
+                } finally {
+                    try { pending?.finish() } catch (t: Throwable) {}
+                }
+            }
+            if (!dispatched) {
+                NotifHub.post(ctx, "⚠️ Reply nahi gaya", "App khol ke dobara bhejein", "reply-fail")
+                pending?.finish()
+                async = null
+                return
+            }
+            Handler(Looper.getMainLooper()).postDelayed({ NotifHub.completeReply(requestId, false) }, 9000L)
+            async = null // completion owns the PendingResult from here
         } catch (t: Throwable) {
             Log.e("MusicParty", "reply receiver fail", t)
+            try { async?.finish() } catch (e: Throwable) {}
         }
     }
 

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.util.Log
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * v27: saari notifications ek jagah se — do raste hain
@@ -35,30 +36,41 @@ object NotifHub {
     private var lastKey = ""
     private var lastTs = 0L
 
-    /** v40: jo host abhi notification post kar raha hai, uska reply-injector. */
+    /** v44: current page ko reply bhejo; result async native callback se wapas aata hai. */
     @Volatile
-    private var replyFn: ((String, String) -> Unit)? = null
+    private var replyFn: ((String, String, String) -> Unit)? = null
+    private val pendingReplies = ConcurrentHashMap<String, (Boolean) -> Unit>()
 
-    fun setReplyTarget(fn: ((String, String) -> Unit)?) { replyFn = fn }
+    fun setReplyTarget(fn: ((String, String, String) -> Unit)?) { replyFn = fn }
 
-    /** ReplyReceiver se aaya text page ko do. true = page ne accep kar liya. */
-    fun deliverReply(code: String, text: String): Boolean {
+    /** ReplyReceiver se aaya text WebView tak dispatch karo; send ka ACK baad me aata hai. */
+    fun deliverReply(code: String, text: String, requestId: String, completion: (Boolean) -> Unit): Boolean {
         val f = replyFn ?: return false
+        pendingReplies[requestId] = completion
         return try {
-            f(code, text)
+            f(code, text, requestId)
             true
         } catch (t: Throwable) {
-            Log.e("MusicParty", "reply deliver fail", t)
+            pendingReplies.remove(requestId)
+            Log.e("MusicParty", "reply dispatch fail", t)
             false
         }
     }
 
-    /** Page ke quick-reply function ko call karne wali safe JS. */
-    fun quickReplyJs(code: String, text: String): String {
+    /** WebView se MQTT PUBACK result wapas lo; ek request sirf ek dafa complete hoti hai. */
+    fun completeReply(requestId: String, sent: Boolean) {
+        val done = pendingReplies.remove(requestId) ?: return
+        try { done(sent) } catch (t: Throwable) { Log.e("MusicParty", "reply completion fail", t) }
+    }
+
+    /** Page ke async quick-reply function ko safely start karne wali JS. */
+    fun quickReplyJs(requestId: String, code: String, text: String): String {
+        val r = org.json.JSONObject.quote(requestId)
         val c = org.json.JSONObject.quote(code)
         val t = org.json.JSONObject.quote(text)
-        return "(function(){try{return !!(window.yaarQuickReply&&window.yaarQuickReply(" + c + "," + t +
-                "));}catch(e){return false;}})()"
+        return "(function(){try{if(window.yaarQuickReply){window.yaarQuickReply(" + r + "," + c + "," + t +
+                ");}else if(window.YaarNative&&window.YaarNative.replyResult){window.YaarNative.replyResult(" + r + ",false);}}" +
+                "catch(e){try{if(window.YaarNative&&window.YaarNative.replyResult)window.YaarNative.replyResult(" + r + ",false);}catch(x){}}})()"
     }
 
     fun cancel(ctx: Context, id: Int) {
