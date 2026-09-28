@@ -11,8 +11,18 @@ android {
         applicationId = "app.party.music"
         minSdk = 24
         targetSdk = 35
-        versionCode = 41
-        versionName = "41"
+        versionCode = 42
+        versionName = "42"
+    }
+
+    // ARM64-only APK; keep the install package device-specific (never universal).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = false
+        }
     }
 
     buildTypes {

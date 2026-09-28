@@ -67,7 +67,6 @@ class MainActivity : Activity() {
     /* v30: native player ka apna (Android) button + auto-detect — page ke JS pe bharosa nahi */
     private var nBtn: TextView? = null
     private var lastAutoUrl = ""
-    private var lastCrashShown = ""
 
     /* v27: app background/band hone pe DM notifications ke liye chhupa WebView service */
     private val bgHandler = Handler(Looper.getMainLooper())
@@ -182,16 +181,8 @@ class MainActivity : Activity() {
 
         setContentView(root, FrameLayout.LayoutParams(-1, -1))
 
-        val crash = runCatching { getFileStreamPath("crash.txt").takeIf { it.exists() }?.readText() }.getOrNull()
-        if (crash != null) {
-            status.text = "CRASH REPORT (tap karne pe hatega):\n${crash.take(1400)}"
-            status.visibility = View.VISIBLE
-            status.isClickable = true
-            status.setOnClickListener {
-                status.visibility = View.GONE
-                runCatching { getFileStreamPath("crash.txt").delete() }
-            }
-        }
+        // Purane internal crash notes ko silently discard karo; raw stack trace kabhi screen par nahi.
+        runCatching { getFileStreamPath("crash.txt").delete() }
 
         // Full cookie support so logged-in sessions and the iframe player behave normally.
         val cookieManager = CookieManager.getInstance()
@@ -377,26 +368,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /* v32: native player me jo error aayi thi uski POORI detail yahan (tap karne tak ruke) */
-    private fun showNativeError() {
-        try {
-            val f = getFileStreamPath("crash.txt")
-            if (!f.exists()) return
-            val txt = f.readText()
-            if (txt.isBlank() || txt == lastCrashShown) return
-            lastCrashShown = txt
-            if (!::status.isInitialized) return
-            val body = if (txt.length > 1700) txt.take(900) + "\n\u2026\n" + txt.takeLast(700) else txt
-            status.text = "\u26a0\ufe0f NATIVE PLAYER LOG (tap = hatao):\n" + body
-            status.visibility = View.VISIBLE
-            status.isClickable = true
-            status.setOnClickListener {
-                status.visibility = View.GONE
-                runCatching { getFileStreamPath("crash.txt").delete() }
-            }
-        } catch (t: Throwable) {}
-    }
-
     private fun showBanner(message: String) {
         if (!::banner.isInitialized) return
         banner.removeCallbacks(hideBanner)
@@ -447,20 +418,28 @@ class MainActivity : Activity() {
         }
     }
 
+    private val stopBgIfForeground = Runnable {
+        /* Start request ka onCreate/startForeground pehle complete hone do. */
+        if (resumed && !BgNotifyService.noteMuted && BgNotifyService.running) {
+            try { BgNotifyService.stop(this) } catch (t: Throwable) {}
+        }
+    }
+
     override fun onStart() {
         super.onStart()
-        /* app saamne aa gaya -> background wisper band karo (warna double kaam) */
-        try { bgHandler.removeCallbacks(bgStarter) } catch (t: Throwable) {}
-        /* v39: agar user ne "Messages on" note swipe kar diya hai to service chalti rahe
-           (band karne se agli dafa dobara note post hota hai). */
-        if (!BgNotifyService.noteMuted) BgNotifyService.stop(this)
+        try {
+            bgHandler.removeCallbacks(bgStarter)
+            bgHandler.removeCallbacks(stopBgIfForeground)
+            /* onStart par foran stop karna FGS ke pending start ko race me cancel kar sakta tha.
+               Thori dair baad sirf confirmed-running service band karo. */
+            if (!BgNotifyService.noteMuted) bgHandler.postDelayed(stopBgIfForeground, 2000L)
+        } catch (t: Throwable) {}
     }
 
     override fun onResume() {
         super.onResume()
         resumed = true
         web.onResume()
-        showNativeError()
     }
 
     override fun onPause() {
@@ -470,6 +449,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        try { bgHandler.removeCallbacks(stopBgIfForeground) } catch (t: Throwable) {}
         web.onResume()
         web.resumeTimers()
         /* v27: 2.5s baad bhi app peeche hai to background service chala do

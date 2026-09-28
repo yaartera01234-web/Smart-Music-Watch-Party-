@@ -37,6 +37,7 @@ class BgNotifyService : Service() {
         private const val URL = "https://yaartera01234-web.github.io/watch-party/party-final1.html?bg=1"
 
         @Volatile var running = false
+        @Volatile var foregroundReady = false
 
         /* v39: user ne "Messages on" note swipe kar diya -> usay dobara pareshan na karo */
         @Volatile var noteMuted = false
@@ -58,6 +59,9 @@ class BgNotifyService : Service() {
         }
 
         fun stop(ctx: Context) {
+            /* stopService before onCreate/startForeground completed caused Android's
+               ForegroundServiceDidNotStartInTimeException. */
+            if (!running || !foregroundReady) return
             try { ctx.stopService(Intent(ctx, BgNotifyService::class.java)) } catch (t: Throwable) {}
         }
     }
@@ -85,14 +89,20 @@ class BgNotifyService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
+        foregroundReady = false
         startedAt = System.currentTimeMillis()
         lastPing = startedAt
         noteMuted = try { prefs(this).getBoolean("noteMuted", false) } catch (t: Throwable) { false }
         try {
             startForeground(NOTE_ID, NotifHub.serviceNote(this))
             notePosted = true
+            foregroundReady = true
         } catch (t: Throwable) {
             Log.e(TAG, "foreground fail", t)
+            foregroundReady = false
+            running = false
+            stopSelf()
+            return
         }
         /* v41: "Messages on" note user ko tang kar raha tha. Android 13+ pe foreground
            service chalti rehti hai (messages aate rehte hain) magar note chup-chaap
@@ -182,7 +192,16 @@ class BgNotifyService : Service() {
             return START_STICKY
         }
         if (!notePosted) {
-            try { startForeground(NOTE_ID, NotifHub.serviceNote(this)); notePosted = true } catch (t: Throwable) {}
+            try {
+                startForeground(NOTE_ID, NotifHub.serviceNote(this))
+                notePosted = true
+                foregroundReady = true
+            } catch (t: Throwable) {
+                Log.e(TAG, "foreground retry fail", t)
+                foregroundReady = false
+                stopSelfResult(startId)
+                return START_NOT_STICKY
+            }
         }
         return START_STICKY
     }
@@ -200,6 +219,7 @@ class BgNotifyService : Service() {
 
     override fun onDestroy() {
         running = false
+        foregroundReady = false
         try { NotifHub.setReplyTarget(null) } catch (t: Throwable) {}
         try { handler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
         try {
