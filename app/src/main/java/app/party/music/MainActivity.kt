@@ -64,6 +64,8 @@ class MainActivity : Activity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
     private var pendingWebPerm: PermissionRequest? = null
+    private var pendingIncomingCallAction: Pair<String, String>? = null
+    private var pageLoaded = false
     private var resumed = false
     private var callAudioActive = false
     private var callOriginalMode = AudioManager.MODE_NORMAL
@@ -96,6 +98,7 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingIncomingCallAction = parseIncomingCallAction(intent)
 
         // Self-reporting crashes: write trace to a file, show it briefly next launch.
         Thread.setDefaultUncaughtExceptionHandler { _, error ->
@@ -225,6 +228,8 @@ class MainActivity : Activity() {
 
             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                 splash.visibility = View.GONE
+                pageLoaded = true
+                dispatchIncomingCallAction()
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
@@ -360,6 +365,19 @@ class MainActivity : Activity() {
             fun stopOngoingCall() { CallForegroundService.stop(this@MainActivity) }
 
             @android.webkit.JavascriptInterface
+            fun showIncomingCall(caller: String?, callId: String?): Boolean {
+                return try {
+                    if (callId.isNullOrEmpty()) false else {
+                        CallForegroundService.showIncoming(this@MainActivity, caller ?: "Private contact", callId)
+                        true
+                    }
+                } catch (t: Throwable) { Log.e("MusicParty", "incoming call alert failed", t); false }
+            }
+
+            @android.webkit.JavascriptInterface
+            fun clearIncomingCall() { CallForegroundService.stop(this@MainActivity) }
+
+            @android.webkit.JavascriptInterface
             fun appVersion(): Int = 41
         }, "YaarNative")
         registerForegroundReplyTarget()
@@ -375,6 +393,30 @@ class MainActivity : Activity() {
         // Har launch pe naya query lagane se page TAZA aata hai, warna naye fixes app me
         // dikhte hi nahi (assets/libs cache me rehte hain, sirf ~100KB page dobara aata hai).
         web.loadUrl(url + "?v=" + System.currentTimeMillis())
+    }
+
+    private fun parseIncomingCallAction(source: Intent?): Pair<String, String>? {
+        val method = when (source?.action) {
+            CallForegroundService.ACTION_ANSWER_INCOMING -> "yaarAnswerIncomingCall"
+            CallForegroundService.ACTION_DECLINE_INCOMING -> "yaarDeclineIncomingCall"
+            else -> return null
+        }
+        return method to (source?.getStringExtra(CallForegroundService.EXTRA_CALL_ID) ?: "")
+    }
+
+    private fun dispatchIncomingCallAction() {
+        val action = pendingIncomingCallAction ?: return
+        if (!::web.isInitialized || !pageLoaded) return
+        pendingIncomingCallAction = null
+        val callId = org.json.JSONObject.quote(action.second)
+        web.post { web.evaluateJavascript("window.${action.first} && window.${action.first}($callId)", null) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingIncomingCallAction = parseIncomingCallAction(intent)
+        dispatchIncomingCallAction()
     }
 
     private fun registerForegroundReplyTarget() {
