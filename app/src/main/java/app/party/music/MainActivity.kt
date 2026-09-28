@@ -452,13 +452,12 @@ class MainActivity : Activity() {
         try { bgHandler.removeCallbacks(stopBgIfForeground) } catch (t: Throwable) {}
         web.onResume()
         web.resumeTimers()
-        /* v27: 2.5s baad bhi app peeche hai to background service chala do
-           (photo/GIF picker jaisi chhoti chhoot me service start nahi hoti) */
+        /* User app se bahar jaye to background DM listener foran start ho,
+           taa ke 30-second blind window na rahe. */
         if (!isChangingConfigurations) {
             try {
                 bgHandler.removeCallbacks(bgStarter)
-                /* v39: 2.5s -> 30s: sirf chhoti chhoot (picker/switch) me note nazar na aaye */
-                bgHandler.postDelayed(bgStarter, 30000)
+                bgHandler.post(bgStarter)
             } catch (t: Throwable) {}
         }
     }
