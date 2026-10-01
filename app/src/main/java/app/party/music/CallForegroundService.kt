@@ -72,7 +72,17 @@ class CallForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopSelfResult(startId)
+                try {
+                    handler.removeCallbacksAndMessages(null)
+                    ringing = false
+                    stopRingtone()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
+                    else stopForeground(true)
+                    try { if (callWakeLock?.isHeld == true) callWakeLock?.release() } catch (_: Throwable) {}
+                    callWakeLock = null
+                    running = false
+                } catch (_: Throwable) {}
+                stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_RING -> {

@@ -466,17 +466,41 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     private fun resetCallAudioRoute() {
         val restore = Runnable {
-            if (!callAudioActive) return@Runnable
+            if (!callAudioActive) {
+                // Even if not active, ensure mode normal
+                try {
+                    val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    audio.mode = AudioManager.MODE_NORMAL
+                    audio.isSpeakerphoneOn = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try { audio.clearCommunicationDevice() } catch (_: Throwable) {}
+                    }
+                } catch (_: Throwable) {}
+                return@Runnable
+            }
             try {
                 val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val devices = audio.availableCommunicationDevices
-                    val original = callOriginalDevice
-                    if (original != null && devices.any { it.id == original.id }) audio.setCommunicationDevice(original)
-                    else audio.clearCommunicationDevice()
+                    try {
+                        val devices = audio.availableCommunicationDevices
+                        val original = callOriginalDevice
+                        if (original != null && devices.any { it.id == original.id }) audio.setCommunicationDevice(original)
+                        else audio.clearCommunicationDevice()
+                    } catch (_: Throwable) { try { audio.clearCommunicationDevice() } catch (_: Throwable) {} }
                 }
                 audio.isSpeakerphoneOn = callOriginalSpeaker
                 audio.mode = callOriginalMode
+                // Boss fix: force normal mode after 500ms to release mic for WhatsApp
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try {
+                        val a2 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        a2.mode = AudioManager.MODE_NORMAL
+                        a2.isSpeakerphoneOn = false
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            try { a2.clearCommunicationDevice() } catch (_: Throwable) {}
+                        }
+                    } catch (_: Throwable) {}
+                }, 500)
             } catch (t: Throwable) {
                 Log.w("MusicParty", "call audio restore failed", t)
             } finally {
