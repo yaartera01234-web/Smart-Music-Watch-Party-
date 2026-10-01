@@ -60,23 +60,13 @@ class CallForegroundService : Service() {
 
         fun stop(context: Context) {
             try {
-                // First send ACTION_STOP via start to run cleanup
-                val stopIntent = Intent(context, CallForegroundService::class.java).setAction(ACTION_STOP)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    try { context.startForegroundService(stopIntent) } catch (_: Throwable) { context.startService(stopIntent) }
-                } else {
-                    context.startService(stopIntent)
-                }
-            } catch (_: Throwable) {}
-            try { 
-                // Then stop service
-                context.stopService(Intent(context, CallForegroundService::class.java)) 
-            } catch (_: Throwable) {}
-            try {
-                // Also cancel notifications directly
+                // Cancel notifications first to avoid lingering
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
                 nm.cancel(ACTIVE_NOTIFICATION_ID)
                 nm.cancel(INCOMING_NOTIFICATION_ID)
+            } catch (_: Throwable) {}
+            try { 
+                context.stopService(Intent(context, CallForegroundService::class.java)) 
             } catch (_: Throwable) {}
         }
     }

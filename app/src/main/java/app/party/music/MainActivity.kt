@@ -468,35 +468,15 @@ class MainActivity : Activity() {
         val restore = Runnable {
             try {
                 val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                // Always force normal immediately
                 try { audio.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
                 try { audio.isSpeakerphoneOn = false } catch (_: Throwable) {}
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     try { audio.clearCommunicationDevice() } catch (_: Throwable) {}
                 }
-                // Abandon audio focus if any
                 try { audio.abandonAudioFocus(null) } catch (_: Throwable) {}
-                try { 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        audio.abandonAudioFocusRequest(android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).build())
-                    }
-                } catch (_: Throwable) {}
-
-                if (callAudioActive) {
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            val devices = audio.availableCommunicationDevices
-                            val original = callOriginalDevice
-                            if (original != null && devices.any { it.id == original.id }) {
-                                // restore briefly then clear
-                                try { audio.setCommunicationDevice(original) } catch (_: Throwable) {}
-                            }
-                        }
-                        audio.isSpeakerphoneOn = callOriginalSpeaker
-                        audio.mode = callOriginalMode
-                    } catch (_: Throwable) {}
-                }
-                // Force normal again after delays - 100% mic free for WhatsApp/Snapchat
+                callAudioActive = false
+                callOriginalDevice = null
+                // Extra delayed force to release mic for WhatsApp - no crash
                 Handler(Looper.getMainLooper()).postDelayed({
                     try {
                         val a2 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -505,27 +485,20 @@ class MainActivity : Activity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             try { a2.clearCommunicationDevice() } catch (_: Throwable) {}
                         }
-                        try { a2.abandonAudioFocus(null) } catch (_: Throwable) {}
                     } catch (_: Throwable) {}
-                }, 300)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        val a3 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        a3.mode = AudioManager.MODE_NORMAL
-                        a3.isSpeakerphoneOn = false
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            try { a3.clearCommunicationDevice() } catch (_: Throwable) {}
-                        }
-                    } catch (_: Throwable) {}
-                }, 1000)
+                }, 500)
             } catch (t: Throwable) {
                 Log.w("MusicParty", "call audio restore failed", t)
-            } finally {
                 callAudioActive = false
                 callOriginalDevice = null
             }
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) restore.run() else runOnUiThread(restore)
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) restore.run() else runOnUiThread(restore)
+        } catch (_: Throwable) {
+            callAudioActive = false
+            callOriginalDevice = null
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
