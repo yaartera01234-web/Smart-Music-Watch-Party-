@@ -473,15 +473,32 @@ class MainActivity : Activity() {
         val restore = Runnable {
             try {
                 val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                // Force normal mode - fixes volume zero but song 100% bug (was stuck in IN_COMMUNICATION)
                 try { audio.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
                 try { audio.isSpeakerphoneOn = false } catch (_: Throwable) {}
+                try { audio.isMicrophoneMute = false } catch (_: Throwable) {}
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     try { audio.clearCommunicationDevice() } catch (_: Throwable) {}
                 }
                 try { audio.abandonAudioFocus(null) } catch (_: Throwable) {}
                 callAudioActive = false
                 callOriginalDevice = null
-                // Boss fix: mic lock again - force 3 times with delay, stable
+                // Re-take media focus to ensure media stream (not call stream)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val focusReq = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                            .setAudioAttributes(
+                                android.media.AudioAttributes.Builder()
+                                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                                    .build()
+                            ).build()
+                        try { audio.requestAudioFocus(focusReq) } catch (_: Throwable) {}
+                        // Immediately abandon to reset
+                        try { audio.abandonAudioFocusRequest(focusReq) } catch (_: Throwable) {}
+                    }
+                } catch (_: Throwable) {}
+                // Force 3 times with delay - ensures media volume controls work
                 Handler(Looper.getMainLooper()).postDelayed({
                     try {
                         val a2 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -606,6 +623,19 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         web.onResume()
+        // Boss fix: volume zero but song 100% - media playing via call stream - ensure normal mode when not in call
+        if (!CallForegroundService.running) {
+            try { resetCallAudioRoute() } catch (_: Throwable) {}
+            // Extra force normal mode immediately
+            try {
+                val audio = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                audio.mode = android.media.AudioManager.MODE_NORMAL
+                audio.isSpeakerphoneOn = false
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    try { audio.clearCommunicationDevice() } catch (_: Throwable) {}
+                }
+            } catch (_: Throwable) {}
+        }
     }
 
     override fun onPause() {
