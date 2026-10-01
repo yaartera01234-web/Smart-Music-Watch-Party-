@@ -60,12 +60,24 @@ class CallForegroundService : Service() {
 
         fun stop(context: Context) {
             try {
-                // Cancel notifications first to avoid lingering
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
                 nm.cancel(ACTIVE_NOTIFICATION_ID)
                 nm.cancel(INCOMING_NOTIFICATION_ID)
             } catch (_: Throwable) {}
+            try {
+                // Try graceful stop via ACTION_STOP first
+                val i = Intent(context, CallForegroundService::class.java).setAction(ACTION_STOP)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    try { context.startForegroundService(i) } catch (_: Throwable) { context.startService(i) }
+                } else {
+                    try { context.startService(i) } catch (_: Throwable) {}
+                }
+            } catch (_: Throwable) {}
             try { 
+                // Then ensure stopped
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try { context.stopService(Intent(context, CallForegroundService::class.java)) } catch (_: Throwable) {}
+                }, 300)
                 context.stopService(Intent(context, CallForegroundService::class.java)) 
             } catch (_: Throwable) {}
         }
@@ -79,17 +91,22 @@ class CallForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                try { handler.removeCallbacksAndMessages(null) } catch (_: Throwable) {}
+                ringing = false
+                try { stopRingtone() } catch (_: Throwable) {}
                 try {
-                    handler.removeCallbacksAndMessages(null)
-                    ringing = false
-                    stopRingtone()
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
                     else stopForeground(true)
-                    try { if (callWakeLock?.isHeld == true) callWakeLock?.release() } catch (_: Throwable) {}
-                    callWakeLock = null
-                    running = false
                 } catch (_: Throwable) {}
-                stopSelf()
+                try { if (callWakeLock?.isHeld == true) callWakeLock?.release() } catch (_: Throwable) {}
+                callWakeLock = null
+                running = false
+                try {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.cancel(ACTIVE_NOTIFICATION_ID)
+                    nm.cancel(INCOMING_NOTIFICATION_ID)
+                } catch (_: Throwable) {}
+                try { stopSelf() } catch (_: Throwable) {}
                 return START_NOT_STICKY
             }
             ACTION_RING -> {

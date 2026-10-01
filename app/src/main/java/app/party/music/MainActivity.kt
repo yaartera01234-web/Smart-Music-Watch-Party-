@@ -401,6 +401,18 @@ class MainActivity : Activity() {
             CallForegroundService.ACTION_DECLINE_INCOMING -> "yaarDeclineIncomingCall"
             else -> return null
         }
+        // Boss fix: top notification se Accept/Decline dabate hi ringing band karo, warna stuck rehta hai
+        try {
+            if (method == "yaarDeclineIncomingCall") {
+                CallForegroundService.stop(this)
+            } else {
+                // Answer pe bhi ring band, service active me jayega JS se
+                try { 
+                    val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.cancel(9043)
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
         return method to (source?.getStringExtra(CallForegroundService.EXTRA_CALL_ID) ?: "")
     }
 
@@ -476,7 +488,7 @@ class MainActivity : Activity() {
                 try { audio.abandonAudioFocus(null) } catch (_: Throwable) {}
                 callAudioActive = false
                 callOriginalDevice = null
-                // Extra delayed force to release mic for WhatsApp - no crash
+                // Boss fix: mic lock again - force 3 times with delay, stable
                 Handler(Looper.getMainLooper()).postDelayed({
                     try {
                         val a2 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -485,8 +497,19 @@ class MainActivity : Activity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             try { a2.clearCommunicationDevice() } catch (_: Throwable) {}
                         }
+                        try { a2.abandonAudioFocus(null) } catch (_: Throwable) {}
                     } catch (_: Throwable) {}
-                }, 500)
+                }, 400)
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try {
+                        val a3 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        a3.mode = AudioManager.MODE_NORMAL
+                        a3.isSpeakerphoneOn = false
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            try { a3.clearCommunicationDevice() } catch (_: Throwable) {}
+                        }
+                    } catch (_: Throwable) {}
+                }, 1200)
             } catch (t: Throwable) {
                 Log.w("MusicParty", "call audio restore failed", t)
                 callAudioActive = false
