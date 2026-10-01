@@ -573,6 +573,8 @@ class MainActivity : Activity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        // Boss fix: call ke dauran PiP me na jao - warna app bahar phenkta hai
+        if (CallForegroundService.running) return
         // Home button: shrink into PiP so the WebView stays visible and the party keeps playing.
         if (Build.VERSION.SDK_INT >= 26 && customView == null) {
             runCatching {
@@ -628,6 +630,8 @@ class MainActivity : Activity() {
         try { bgHandler.removeCallbacks(stopBgIfForeground) } catch (t: Throwable) {}
         web.onResume()
         web.resumeTimers()
+        /* Boss fix: call ke dauran BgNotifyService start na karo - clash se app bahar phenkta hai */
+        if (CallForegroundService.running) return
         /* User app se bahar jaye to background DM listener foran start ho,
            taa ke 30-second blind window na rahe. */
         if (!isChangingConfigurations) {
