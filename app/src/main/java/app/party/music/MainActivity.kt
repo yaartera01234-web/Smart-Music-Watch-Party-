@@ -401,17 +401,10 @@ class MainActivity : Activity() {
             CallForegroundService.ACTION_DECLINE_INCOMING -> "yaarDeclineIncomingCall"
             else -> return null
         }
-        // Boss fix: top notification se Accept/Decline dabate hi ringing band karo, warna stuck rehta hai
+        // Boss fix: top se Accept/Decline pe ring band karo - simple cancel, JS se proper stop hoga
         try {
-            if (method == "yaarDeclineIncomingCall") {
-                CallForegroundService.stop(this)
-            } else {
-                // Answer pe bhi ring band, service active me jayega JS se
-                try { 
-                    val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-                    nm.cancel(9043)
-                } catch (_: Throwable) {}
-            }
+            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.cancel(9043)
         } catch (_: Throwable) {}
         return method to (source?.getStringExtra(CallForegroundService.EXTRA_CALL_ID) ?: "")
     }

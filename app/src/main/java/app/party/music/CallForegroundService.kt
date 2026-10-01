@@ -64,20 +64,7 @@ class CallForegroundService : Service() {
                 nm.cancel(ACTIVE_NOTIFICATION_ID)
                 nm.cancel(INCOMING_NOTIFICATION_ID)
             } catch (_: Throwable) {}
-            try {
-                // Try graceful stop via ACTION_STOP first
-                val i = Intent(context, CallForegroundService::class.java).setAction(ACTION_STOP)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    try { context.startForegroundService(i) } catch (_: Throwable) { context.startService(i) }
-                } else {
-                    try { context.startService(i) } catch (_: Throwable) {}
-                }
-            } catch (_: Throwable) {}
             try { 
-                // Then ensure stopped
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try { context.stopService(Intent(context, CallForegroundService::class.java)) } catch (_: Throwable) {}
-                }, 300)
                 context.stopService(Intent(context, CallForegroundService::class.java)) 
             } catch (_: Throwable) {}
         }
