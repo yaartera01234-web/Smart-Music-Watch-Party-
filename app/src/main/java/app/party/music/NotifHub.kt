@@ -4,62 +4,200 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.util.Log
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * PURE NATIVE - No WebView, No JS, No YaarNative - MPV ONLY
+ * v27: saari notifications ek jagah se — do raste hain
+ *   1) app peeche hai  -> MainActivity ka WebView (document.hidden)
+ *   2) app poora band  -> BgNotifyService ka chhupa WebView
+ * Dono jagah se ek hi message aa sakta hai, is liye 8 second ke andar
+ * same title+text dobara post nahi hota (duplicate notification se bachne ke liye).
+ *
+ * v40: DM notification me WhatsApp jaisa "Reply" button (inline remote input).
+ *      Likha hua text -> ReplyReceiver -> NotifHub.deliverReply() -> chalta hua
+ *      WebView (page) -> wahan E2E encrypt hoke MQTT pe chala jata hai.
+ *      Is liye app band hone pe bhi notification se seedha jawab diya ja sakta hai.
  */
 object NotifHub {
+
     private const val CH_DM = "dm"
-    private const val CH_BG = "mpvparty_bg"
+    private const val CH_BG = "bg2"
+    private const val CH_BG_OLD = "bg"
+
     const val REPLY_KEY = "yp_reply_text"
-    const val ACTION_REPLY = "app.smart.mpv.party.REPLY"
+    const val ACTION_REPLY = "app.party.music.REPLY"
+
     private var lastKey = ""
     private var lastTs = 0L
+
+    /** v45: foreground Activity aur background WebView ke reply targets alag rakho. */
+    private val replyFns = ConcurrentHashMap<String, (String, String, String) -> Unit>()
+    private val pendingReplies = ConcurrentHashMap<String, (Boolean) -> Unit>()
+
+    fun setReplyTarget(source: String, fn: ((String, String, String) -> Unit)?) {
+        if (fn == null) replyFns.remove(source) else replyFns[source] = fn
+    }
+
+    /** Notification ke source WebView ko pehle try karo; purane notif par doosra live host fallback hai. */
+    fun deliverReply(source: String, code: String, text: String, requestId: String, completion: (Boolean) -> Unit): Boolean {
+        val f = replyFns[source] ?: replyFns.values.firstOrNull() ?: return false
+        pendingReplies[requestId] = completion
+        return try {
+            f(code, text, requestId)
+            true
+        } catch (t: Throwable) {
+            pendingReplies.remove(requestId)
+            Log.e("MusicParty", "reply dispatch fail", t)
+            false
+        }
+    }
+
+    /** WebView se MQTT PUBACK result wapas lo; ek request sirf ek dafa complete hoti hai. */
+    fun completeReply(requestId: String, sent: Boolean) {
+        val done = pendingReplies.remove(requestId) ?: return
+        try { done(sent) } catch (t: Throwable) { Log.e("MusicParty", "reply completion fail", t) }
+    }
+
+    /** Page ke async quick-reply function ko safely start karne wali JS. */
+    fun quickReplyJs(requestId: String, code: String, text: String): String {
+        val r = org.json.JSONObject.quote(requestId)
+        val c = org.json.JSONObject.quote(code)
+        val t = org.json.JSONObject.quote(text)
+        return "(function(){try{if(window.yaarQuickReply){window.yaarQuickReply(" + r + "," + c + "," + t +
+                ");}else if(window.YaarNative&&window.YaarNative.replyResult){window.YaarNative.replyResult(" + r + ",false);}}" +
+                "catch(e){try{if(window.YaarNative&&window.YaarNative.replyResult)window.YaarNative.replyResult(" + r + ",false);}catch(x){}}})()"
+    }
+
+    fun cancel(ctx: Context, id: Int) {
+        try {
+            (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(id)
+        } catch (t: Throwable) {}
+    }
+
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         try {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(NotificationChannel(CH_DM, "MPV Party Messages", NotificationManager.IMPORTANCE_HIGH))
-            nm.createNotificationChannel(NotificationChannel(CH_BG, "MPV Party Background", NotificationManager.IMPORTANCE_LOW))
-        } catch (t: Throwable) { Log.e("MPVParty", "channel fail", t) }
+            val dm = NotificationChannel(CH_DM, "Messages", NotificationManager.IMPORTANCE_HIGH)
+            dm.enableVibration(true)
+            dm.description = "Dost ke DM messages"
+            nm.createNotificationChannel(dm)
+            /* v29: purana "bg" channel hata do (uski importance badli nahi ja sakti) */
+            try { nm.deleteNotificationChannel(CH_BG_OLD) } catch (t: Throwable) {}
+            val bg = NotificationChannel(CH_BG, "Background (messages on)", NotificationManager.IMPORTANCE_MIN)
+            bg.setShowBadge(false)
+            bg.enableLights(false)
+            bg.enableVibration(false)
+            bg.setSound(null, null)
+            bg.lockscreenVisibility = Notification.VISIBILITY_SECRET
+            bg.description = "App band hone pe bhi messages aate rahen (chup-chaap)"
+            nm.createNotificationChannel(bg)
+        } catch (t: Throwable) {
+            Log.e("MusicParty", "channel fail", t)
+        }
     }
+
     private fun openApp(ctx: Context): PendingIntent {
-        val i = Intent(ctx, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK }
-        return PendingIntent.getActivity(ctx, 0, i, if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+        val i = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        return PendingIntent.getActivity(
+            ctx, 0, i,
+            if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0
+        )
     }
-    fun post(ctx: Context, title: String?, text: String?) {
+
+    /**
+     * v40: Reply button ka PendingIntent. RemoteInput ko kaam karne ke liye
+     * Android 12+ pe FLAG_MUTABLE laazmi hai (IMMUTABLE se system text nahi likh paata).
+     * Har peer ka apna request code (=notification id) hai, warna ek peer ka reply
+     * doosre ke paas chala jata.
+     */
+    private fun replyIntent(ctx: Context, peer: String, nid: Int, source: String): PendingIntent {
+        val i = Intent(ctx, ReplyReceiver::class.java)
+            .setAction(ACTION_REPLY)
+            .putExtra("code", peer)
+            .putExtra("nid", nid)
+            .putExtra("source", source)
+        val flags = if (Build.VERSION.SDK_INT >= 31)
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        else PendingIntent.FLAG_UPDATE_CURRENT
+        return PendingIntent.getBroadcast(ctx, nid, i, flags)
+    }
+
+    /** DM message ki notification (app saamne na ho to). peer = bhejne wale ka code. */
+    fun post(ctx: Context, title: String?, text: String?, src: String, peer: String? = null) {
         synchronized(this) {
             val key = (title ?: "") + "|" + (text ?: "")
             val now = System.currentTimeMillis()
             if (key == lastKey && now - lastTs < 8000) return
-            lastKey = key; lastTs = now
+            lastKey = key
+            lastTs = now
         }
         try {
             ensureChannels(ctx)
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val nid = (System.currentTimeMillis() % 100000).toInt()
+            val hasPeer = !peer.isNullOrEmpty()
+            /* peer ka apna id -> usi chat ki purani notification update hoti hai */
+            val nid = if (hasPeer) 6000 + (Math.abs(peer!!.hashCode()) % 900)
+                      else (System.currentTimeMillis() % 100000).toInt()
             val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, CH_DM) else Notification.Builder(ctx)
-            b.setSmallIcon(R.drawable.app_icon).setContentTitle(title ?: "💬 MPV Party").setContentText(text ?: "New message").setAutoCancel(true).setContentIntent(openApp(ctx))
-            if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#c026d3"))
+            b.setSmallIcon(R.drawable.app_icon)
+                .setContentTitle(title ?: "\uD83D\uDCAC Messages")
+                .setContentText(text ?: "Naya message aaya hai")
+                .setAutoCancel(true)
+                .setContentIntent(openApp(ctx))
+            if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
+            if (hasPeer) {
+                try {
+                    val ri = RemoteInput.Builder(REPLY_KEY).setLabel("Reply likho…").build()
+                    @Suppress("DEPRECATION")
+                    val act = Notification.Action.Builder(R.drawable.app_icon, "Reply", replyIntent(ctx, peer!!, nid, src))
+                        .addRemoteInput(ri)
+                        .setAllowGeneratedReplies(true)
+                        .build()
+                    b.addAction(act)
+                } catch (t: Throwable) {
+                    Log.e("MusicParty", "reply action fail", t)
+                }
+            }
             nm.notify(nid, b.build())
-        } catch (t: Throwable) { Log.e("MPVParty", "notify fail", t) }
+        } catch (t: Throwable) {
+            Log.e("MusicParty", "notify fail", t)
+        }
     }
-    fun post(ctx: Context, title: String?, text: String?, src: String, peer: String? = null) { post(ctx, title, text) }
+
+    /** v39: user ne note swipe kar diya -> chhupi service ko batao (dobara note na aaye). */
+    private fun dismissIntent(ctx: Context): PendingIntent {
+        val i = Intent(ctx, BgNotifyService::class.java).setAction(BgNotifyService.NOTE_GONE)
+        return PendingIntent.getService(
+            ctx, 7, i,
+            if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            else PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    /** Background service ka chalta-hua (silent) notification. */
     fun serviceNote(ctx: Context): Notification {
         ensureChannels(ctx)
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, CH_BG) else Notification.Builder(ctx)
-        b.setSmallIcon(R.drawable.app_icon).setContentTitle("Smart MPV Party").setContentText("MPV 0.3.0 pure native - no HTML").setOngoing(true).setContentIntent(openApp(ctx))
-        if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#c026d3"))
+        b.setSmallIcon(R.drawable.app_icon)
+            .setContentTitle("\uD83D\uDCAC Messages on")
+            .setContentText("Naya message aane pe notification aayegi")
+            /* v39: chipka hua note user ko tang kar raha tha -> ab swipe karke hata sakte hain.
+               Swipe hone pe service ko pata chal jata hai aur dobara note nahi aata. */
+            .setOngoing(false)
+            .setAutoCancel(false)
+            .setDeleteIntent(dismissIntent(ctx))
+            .setShowWhen(false)
+            .setContentIntent(openApp(ctx))
+        if (Build.VERSION.SDK_INT >= 21) b.setColor(Color.parseColor("#FF5EBC"))
         return b.build()
     }
-    fun setReplyTarget(source: String, fn: ((String, String, String) -> Unit)?) {}
-    fun deliverReply(source: String, code: String, text: String, requestId: String, completion: (Boolean) -> Unit): Boolean { return false }
-    fun completeReply(requestId: String, sent: Boolean) {}
-    fun quickReplyJs(requestId: String, code: String, text: String): String { return "" }
-    fun cancel(ctx: Context, id: Int) { try { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(id) } catch (t: Throwable) {} }
 }

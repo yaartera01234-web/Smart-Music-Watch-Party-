@@ -1,255 +1,811 @@
 package app.party.music
 
 import android.app.Activity
-import android.graphics.Color
+import android.content.ComponentName
+import android.content.Context
+import android.content.SharedPreferences
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.SurfaceView
 import android.view.View
+import android.view.WindowManager
+import android.webkit.CookieManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.SeekBar
+import android.widget.ProgressBar
 import android.widget.TextView
-import kotlinx.coroutines.*
-import org.schabi.newpipe.extractor.ServiceList
-import io.github.yuroyami.libmpvkt.view.MpvView
-import io.github.yuroyami.libmpvkt.view.MpvOptions
+import android.widget.Toast
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
+import java.util.Date
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
+/**
+ * v26: Native Player (Media3) + naye controls.
+ * v29: dual audio (audio track switch).
+ * v31: crash guard.
+ * v32: HAR STEP apna try/catch — koi ek cheez fail ho to native phir bhi khule.
+ *      + MediaController (background/notification) fail ho to LOCAL ExoPlayer fallback.
+ *      + error poori screen pe (tap = hatao) aur crash.txt me (agle launch pe banner).
+ * v37: DO-player bug fix (grace 2.6s + local release) + status line + saaf error screen.
+ * v33: immersive() ab setContentView ke BAAD (wahi NPE tha jo app girata tha) + telemetry.
+ *
+ *  - Left side pe ungli se UPAR/NEEche -> BRIGHTNESS
+ *  - Right side pe ungli se UPAR/NEEche -> VOLUME
+ *  - Upar-daayen: Fit / Fill / Zoom  |  Upar-baayen: Audio 1/2
+ */
+@UnstableApi
 class PlayerActivity : Activity() {
-    private var mpvView: MpvView? = null
-    private var root: FrameLayout? = null
-    private var titleView: TextView? = null
-    private var timeView: TextView? = null
-    private var playBtn: TextView? = null
-    private var centerPlay: FrameLayout? = null
-    private var audioPanel: LinearLayout? = null
-    private var settingsPanel: LinearLayout? = null
+
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var controller: MediaController? = null
+    private var localPlayer: ExoPlayer? = null
+    private var localMode = false
+    private var started = false
     private var curUrl = ""
-    private var curTitle = "t3gj68ev41sa"
-    private var isPlaying = false
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var curTitle = "Video"
+    private var altUrl: String? = null
+    private var altTried = false
+    private var web: android.webkit.WebView? = null
+    private var webMode = false
+    private var webPlaying = false
+    private var exoTried = false
+
+    private var root: FrameLayout? = null
+    private var status2: TextView? = null
+    private var note: TextView? = null
+    private var errText: TextView? = null
+    private var pv: PlayerView? = null
+    private var sv: SurfaceView? = null
+    private var modeBtn: TextView? = null
+    private var audioBtn: TextView? = null
+    private var hud: LinearLayout? = null
+    private var hudText: TextView? = null
+    private var hudBar: ProgressBar? = null
+
+    private var am: AudioManager? = null
+    private var prefs: SharedPreferences? = null
+    private val hideRunnable = Runnable { hud?.visibility = View.GONE }
+    private var maxVol = 15
+    private val stepErrs = StringBuilder()
+
+    private val modes = intArrayOf(
+        AspectRatioFrameLayout.RESIZE_MODE_FIT,
+        AspectRatioFrameLayout.RESIZE_MODE_FILL,
+        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    )
+    private val modeNames = arrayOf("Fit", "Fill", "Zoom")
+    private val modeIcons = arrayOf("\u2b1c", "\u26f6", "\u26f6")
+    private var modeIdx = 0
+
+    private var gActive = false
+    private var gZone = 0          // 1 = brightness (left), 2 = volume (right)
+    private var gStartX = 0f
+    private var gStartY = 0f
+    private var gStartBright = 0.5f
+    private var gStartVol = 0
+
+    /* ================= lifecycle ================= */
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        curUrl = intent.getStringExtra("url") ?: ""
-        curTitle = intent.getStringExtra("title") ?: "t3gj68ev41sa"
-        if (curUrl.isBlank()) { finish(); return }
-        buildUi()
-        // New API: MpvView initialize with MpvOptions
+        /* v31: crash guard. v32: har step alag — ek fail ho to baqi chalta rahe. */
         try {
-            mpvView?.initialize(MpvOptions())
-        } catch (e: Exception) {
-            e.printStackTrace()
+            buildUi()
+        } catch (t: Throwable) {
+            fail("create", t)
+            showErrPanel()
         }
-        playUrl(curUrl)
     }
 
     private fun buildUi() {
+        step("audio") {
+            am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            maxVol = am!!.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        }
+        step("prefs") {
+            prefs = getSharedPreferences("yp_player", Context.MODE_PRIVATE)
+            val m = prefs!!.getInt("mode", 0)
+            modeIdx = if (m < 0 || m > 2) 0 else m
+        }
+
         val r = FrameLayout(this)
-        r.setBackgroundColor(Color.BLACK)
+        r.setBackgroundColor(0xFF000000.toInt())
         root = r
-        val mpv = MpvView(this)
-        mpvView = mpv
-        r.addView(mpv, FrameLayout.LayoutParams(-1, -1))
 
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)) }
-        val backBtn = TextView(this).apply { text = "⤢⤡"; setTextColor(Color.WHITE); textSize = 18f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { finish() } }
-        top.addView(backBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(10) })
-        val titleCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val t = TextView(this).apply { text = "🎬 $curTitle"; setTextColor(Color.WHITE); textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD) }
-        titleView = t
-        val tm = TextView(this).apply { text = "0:00 / 0:00"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 12f }
-        timeView = tm
-        titleCol.addView(t); titleCol.addView(tm)
-        top.addView(titleCol, LinearLayout.LayoutParams(0, -2, 1f))
-        val pipBtn = TextView(this).apply { text = "⧉"; setTextColor(Color.WHITE); textSize = 18f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(10), dp(8), dp(10), dp(8)) }
-        top.addView(pipBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
-        r.addView(top, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.TOP })
-
-        val center = FrameLayout(this).apply {
-            val inner = TextView(this@PlayerActivity).apply { text = "▶"; setTextColor(Color.WHITE); textSize = 32f; gravity = Gravity.CENTER }
-            addView(inner, FrameLayout.LayoutParams(-1, -1))
-            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setStroke(dp(1), Color.parseColor("#ffffff1a")) }
+        step("playerView") {
+            val p = PlayerView(this)
+            p.useController = true
+            p.setShowNextButton(false)
+            p.setShowPreviousButton(false)
+            p.resizeMode = modes[modeIdx]
+            pv = p
+            r.addView(p, FrameLayout.LayoutParams(-1, -1))
         }
-        centerPlay = center
-        center.setOnClickListener { togglePlay() }
-        r.addView(center, FrameLayout.LayoutParams(dp(110), dp(110)).apply { gravity = Gravity.CENTER })
-
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(12)) }
-        val prog = SeekBar(this).apply { max = 1000; progress = 0; thumb = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(Color.WHITE); setSize(dp(18), dp(18)) } }
-        bottom.addView(prog, LinearLayout.LayoutParams(-1, dp(24)))
-        val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val tl = TextView(this).apply { text = "0:00"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 12f }
-        val tr = TextView(this).apply { text = "-0:00"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 12f; gravity = Gravity.END }
-        timeRow.addView(tl, LinearLayout.LayoutParams(0, -2, 1f))
-        timeRow.addView(tr, LinearLayout.LayoutParams(0, -2, 1f))
-        bottom.addView(timeRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
-
-        val ctrlRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        fun makeCtrl(txt: String, purple: Boolean = false): TextView {
-            return TextView(this@PlayerActivity).apply {
-                text = txt; setTextColor(Color.WHITE); textSize = 20f; gravity = Gravity.CENTER
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(if (purple) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }
+        if (pv == null) {
+            /* PlayerView ban na sake to simple SurfaceView se video chalao */
+            step("surface") {
+                val s = SurfaceView(this)
+                sv = s
+                r.addView(s, FrameLayout.LayoutParams(-1, -1))
             }
         }
-        val rew = makeCtrl("↻")
-        val play = makeCtrl("▶", true).apply { setPadding(dp(18), dp(14), dp(18), dp(14)); textSize = 22f }
-        playBtn = play
-        play.setOnClickListener { togglePlay() }
-        val fwd = makeCtrl("↺")
-        val audio = makeCtrl("〰️").apply { setOnClickListener { audioPanel?.visibility = View.VISIBLE; settingsPanel?.visibility = View.GONE } }
-        val settings = makeCtrl("⚙️").apply { setOnClickListener { settingsPanel?.visibility = View.VISIBLE; audioPanel?.visibility = View.GONE } }
-        val fs = makeCtrl("⤢").apply { setOnClickListener { finish() } }
-        ctrlRow.addView(rew, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
-        ctrlRow.addView(play, LinearLayout.LayoutParams(dp(64), dp(64)).apply { rightMargin = dp(8) })
-        ctrlRow.addView(fwd, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(16) })
-        ctrlRow.addView(audio, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
-        ctrlRow.addView(settings, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
-        ctrlRow.addView(fs, LinearLayout.LayoutParams(dp(48), dp(48)))
-        bottom.addView(ctrlRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12); gravity = Gravity.CENTER })
-        r.addView(bottom, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.BOTTOM })
 
-        // Audio & Subtitles Panel - exact Watch-Party-Mpv clone 55% width #0a0a0a
-        val ap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#0a0a0a")); setPadding(dp(16), dp(14), dp(16), dp(14)); visibility = View.GONE; elevation = dp(10).toFloat() }
-        val apTitle = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val apIcon = TextView(this).apply { text = "〰️"; setTextColor(Color.parseColor("#c026d3")); textSize = 18f }
-        val apTxt = TextView(this).apply { text = "Audio & Subtitles"; setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(dp(8),0,0,0) }
-        val apClose = TextView(this).apply { text = "✕"; setTextColor(Color.WHITE); textSize = 16f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(10), dp(6), dp(10), dp(6)); gravity = Gravity.CENTER; setOnClickListener { ap.visibility = View.GONE } }
-        apTitle.addView(apIcon); apTitle.addView(apTxt, LinearLayout.LayoutParams(0, -2, 1f)); apTitle.addView(apClose, LinearLayout.LayoutParams(dp(36), dp(36)))
-        ap.addView(apTitle)
-        ap.addView(TextView(this).apply { text = "〰️ AUDIO TRACK (DUAL AUDIO)"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) })
-        ap.addView(TextView(this).apply { text = "Koi audio track list nahi mili"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 13f })
-        ap.addView(TextView(this).apply { text = "📄 SUBTITLES"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) })
-        ap.addView(TextView(this).apply { text = "Off"; setTextColor(Color.WHITE); textSize = 14f; setPadding(dp(16), dp(12), dp(16), dp(12)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(Color.parseColor("#2a0a2a")); setStroke(dp(1), Color.parseColor("#c026d3")) } }, LinearLayout.LayoutParams(-1, dp(48)))
-        fun addSlider(label: String, value: String): LinearLayout {
-            val lay = LinearLayout(this@PlayerActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(14), 0, 0) }
-            val lbl = TextView(this@PlayerActivity).apply { text = "$label · $value"; setTextColor(Color.parseColor("#cccccc")); textSize = 13f }
-            val track = FrameLayout(this@PlayerActivity).apply {
-                val bg = View(this@PlayerActivity).apply { setBackgroundColor(Color.parseColor("#333333")) }
-                addView(bg, FrameLayout.LayoutParams(-1, dp(6)).apply { gravity = Gravity.CENTER_VERTICAL })
-                val fill = View(this@PlayerActivity).apply { setBackgroundColor(Color.parseColor("#c026d3")) }
-                addView(fill, FrameLayout.LayoutParams(dp(120), dp(6)).apply { gravity = Gravity.CENTER_VERTICAL })
-                val dot = View(this@PlayerActivity).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(Color.parseColor("#c026d3")); setSize(dp(18), dp(18)) } }
-                addView(dot, FrameLayout.LayoutParams(dp(18), dp(18)).apply { gravity = Gravity.CENTER_VERTICAL; leftMargin = dp(120) })
+        step("note") {
+            val t = TextView(this).apply {
+                setTextColor(0xFFFF5FA2.toInt())
+                textSize = 13f
+                visibility = View.GONE
             }
-            lay.addView(lbl); lay.addView(track, LinearLayout.LayoutParams(-1, dp(24)).apply { topMargin = dp(8) })
-            return lay
+            note = t
+            r.addView(t, FrameLayout.LayoutParams(-2, -2).apply { leftMargin = dp(40); topMargin = dp(60) })
         }
-        ap.addView(addSlider("Sub size", "1.0x"))
-        ap.addView(addSlider("Sub delay", "0.0s"))
-        ap.addView(addSlider("Audio delay", "0.0s"))
-        audioPanel = ap
-        r.addView(ap, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.55).toInt(), -1).apply { gravity = Gravity.END })
 
-        // Player Settings Panel - VOLUME 100% + BRIGHTNESS 100% purple #c026d3 + SPEED + ASPECT
-        val sp = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#0a0a0a")); setPadding(dp(16), dp(14), dp(16), dp(14)); visibility = View.GONE; elevation = dp(10).toFloat() }
-        val spTitle = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val spIcon = TextView(this).apply { text = "⚙️"; setTextColor(Color.parseColor("#c026d3")); textSize = 18f }
-        val spTxt = TextView(this).apply { text = "Player Settings"; setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(dp(8),0,0,0) }
-        val spClose = TextView(this).apply { text = "✕"; setTextColor(Color.WHITE); textSize = 16f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(10), dp(6), dp(10), dp(6)); gravity = Gravity.CENTER; setOnClickListener { sp.visibility = View.GONE } }
-        spTitle.addView(spIcon); spTitle.addView(spTxt, LinearLayout.LayoutParams(0, -2, 1f)); spTitle.addView(spClose, LinearLayout.LayoutParams(dp(36), dp(36)))
-        sp.addView(spTitle)
-        sp.addView(addSlider("🔊 VOLUME", "100%"))
-        sp.addView(View(this).apply { setBackgroundColor(Color.parseColor("#222222")) }, LinearLayout.LayoutParams(-1, dp(4)).apply { topMargin = dp(10) })
-        sp.addView(addSlider("☀️ BRIGHTNESS", "100%"))
-        val speedLabel = TextView(this).apply { text = "⏱ SPEED"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) }
-        sp.addView(speedLabel)
-        val speedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun speedBtn(txt: String, active: Boolean): TextView {
-            return TextView(this@PlayerActivity).apply { text = txt; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(14), dp(8), dp(14), dp(8)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (active) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }; setOnClickListener { setSpeed(txt) } }
+        step("modeBtn") {
+            val b = TextView(this).apply {
+                textSize = 12f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setBackgroundColor(0x99000000.toInt())
+                text = modeIcons[modeIdx] + "  " + modeNames[modeIdx]
+                setOnClickListener { cycleMode() }
+            }
+            modeBtn = b
+            r.addView(b, FrameLayout.LayoutParams(-2, -2).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = dp(16)
+                rightMargin = dp(16)
+            })
         }
-        speedRow.addView(speedBtn("0.5x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        speedRow.addView(speedBtn("0.75x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        speedRow.addView(speedBtn("1x", true), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        speedRow.addView(speedBtn("1.25x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        speedRow.addView(speedBtn("1.5x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        speedRow.addView(speedBtn("2x", false), LinearLayout.LayoutParams(-2, -2))
-        sp.addView(speedRow)
-        val aspectLabel = TextView(this).apply { text = "⧉ ASPECT"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) }
-        sp.addView(aspectLabel)
-        val aspectRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun aspectBtn(txt: String, active: Boolean): TextView {
-            return TextView(this@PlayerActivity).apply { text = txt; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(16), dp(8), dp(16), dp(8)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (active) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }; setOnClickListener { setAspect(txt); sp.visibility = View.GONE } }
-        }
-        aspectRow.addView(aspectBtn("contain", true), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        aspectRow.addView(aspectBtn("cover", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        aspectRow.addView(aspectBtn("16/9", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        aspectRow.addView(aspectBtn("4/3", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
-        aspectRow.addView(aspectBtn("Pan/Scan", false), LinearLayout.LayoutParams(-2, -2))
-        sp.addView(aspectRow)
-        settingsPanel = sp
-        r.addView(sp, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.55).toInt(), -1).apply { gravity = Gravity.END })
 
-        setContentView(r)
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { it.hide(android.view.WindowInsets.Type.systemBars()); it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE }
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        step("audioBtn") {
+            val b = TextView(this).apply {
+                textSize = 12f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setBackgroundColor(0x99000000.toInt())
+                text = "\uD83D\uDD0A  Audio"
+                setOnClickListener { cycleAudio() }
+            }
+            audioBtn = b
+            r.addView(b, FrameLayout.LayoutParams(-2, -2).apply {
+                gravity = Gravity.TOP or Gravity.START
+                topMargin = dp(16)
+                leftMargin = dp(16)
+            })
         }
+
+        step("hud") {
+            hudText = TextView(this).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 14f
+                setPadding(0, 0, dp(12), 0)
+            }
+            hudBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                progress = 50
+            }
+            val l = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(0xCC000000.toInt())
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                visibility = View.GONE
+                addView(hudText, LinearLayout.LayoutParams(-2, -2))
+                addView(hudBar, LinearLayout.LayoutParams(dp(220), dp(10)))
+            }
+            hud = l
+            r.addView(l, FrameLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER })
+        }
+
+        step("status2") {
+            val t = TextView(this).apply {
+                textSize = 10.5f
+                setTextColor(0xFFBFF3FF.toInt())
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                setBackgroundColor(0x99000000.toInt())
+                text = "v37 \u2022 starting\u2026"
+            }
+            status2 = t
+            r.addView(t, FrameLayout.LayoutParams(-2, -2).apply {
+                gravity = Gravity.BOTTOM or Gravity.START
+                leftMargin = dp(12)
+                bottomMargin = dp(12)
+            })
+        }
+
+        step("show") { setContentView(r) }
+        /* v33 FIX: fullscreen sirf content lagne ke BAAD (pehle decor view null hota hai -> NPE) */
+        step("immersive") { immersive() }
+
+        altUrl = try { intent.getStringExtra("alt") } catch (t: Throwable) { null }
+        val url = try { intent.getStringExtra("url") } catch (t: Throwable) { null }
+        val title = try { intent.getStringExtra("title") } catch (t: Throwable) { null } ?: "Video"
+        val pos = try { intent.getLongExtra("pos", 0L) } catch (t: Throwable) { 0L }
+        if (url.isNullOrBlank()) { finish(); return }
+        curUrl = url
+        curTitle = title
+
+        /* v37: SAB SE PEHLE wahi engine jo premium player me chalta hai (WebView) —
+           jo link page pe chalta hai wahi yahan bhi. 8 second me video na chale to
+           watchdog khud ExoPlayer route pe le jata hai. */
+        step("webview") { startWebFallback(url) }
+        android.os.Handler(android.os.Looper.getMainLooper())
+            .postDelayed({ if (!webPlaying) startExoIfNeeded(url, title, pos) }, 8000)
+
+        if (stepErrs.isNotEmpty()) showErrPanel()
     }
 
-    private fun playUrl(url: String) {
-        scope.launch {
-            var finalUrl = url
-            if (url.contains("youtube") || url.contains("youtu.be")) {
-                finalUrl = extractYoutube360p(url) ?: url
-            }
-            withContext(Dispatchers.Main) {
-                mpvView?.playFile(finalUrl)
-                isPlaying = true
-                playBtn?.text = "⏸"
-                centerPlay?.visibility = View.GONE
-            }
-        }
-    }
+    /* ================= player start ================= */
 
-    private suspend fun extractYoutube360p(url: String): String? = withContext(Dispatchers.IO) {
+    private fun attach(p: Player) {
         try {
-            val service = ServiceList.YouTube
-            val linkHandler = service.streamLHFactory.fromUrl(url)
-            val extractor = service.getStreamExtractor(linkHandler)
-            extractor.fetchPage()
-            val videoStreams = extractor.videoStreams
-            val best360 = videoStreams?.filter { !it.url.isNullOrEmpty() && !it.isVideoOnly }?.sortedBy { kotlin.math.abs((it.height ?: 360) - 360) }?.firstOrNull { it.height in 300..400 } ?: videoStreams?.firstOrNull { !it.url.isNullOrEmpty() && it.height <= 360 }
-            return@withContext best360?.url
-        } catch (e: Exception) { null }
+            val v = pv
+            if (v != null) v.player = p
+            else sv?.let { p.setVideoSurfaceView(it) }
+        } catch (t: Throwable) { fail("attach", t) }
     }
 
-    private fun togglePlay() {
-        val mpv = mpvView?.mpv
-        if (isPlaying) {
-            mpv?.setString("pause", "yes")
-            isPlaying = false; playBtn?.text = "▶"; centerPlay?.visibility = View.VISIBLE
-        } else {
-            mpv?.setString("pause", "no")
-            isPlaying = true; playBtn?.text = "⏸"; centerPlay?.visibility = View.GONE
+    private fun mediaItem(url: String, title: String): MediaItem {
+        val lower = url.lowercase()
+        val b = MediaItem.Builder()
+            .setUri(url)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
+        if (lower.contains(".m3u8")) b.setMimeType(MimeTypes.APPLICATION_M3U8)
+        else if (lower.contains(".mpd")) b.setMimeType(MimeTypes.APPLICATION_MPD)
+        return b.build()
+    }
+
+    private fun startController(url: String, title: String, pos: Long) {
+        val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        val f = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = f
+        f.addListener({
+            try {
+                val c = f.get()
+                if (localMode) {           /* v37: local fallback chal raha tha -> band karo, warna double aawaz */
+                    try { localPlayer?.release() } catch (t: Throwable) {}
+                    localPlayer = null
+                    localMode = false
+                }
+                controller = c
+                started = true
+                setStatus("v37 \u2022 controller OK")
+                attach(c)
+                c.setMediaItem(mediaItem(url, title), pos)
+                c.prepare()
+                c.play()
+                logLine("session OK \u2014 playing")
+                c.addListener(object : Player.Listener {
+                    override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        logLine("state " + state)
+                        setStatus("v37 \u2022 controller \u2022 state " + state)
+                    }
+                    override fun onPlayerError(error: PlaybackException) {
+                        showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
+                    }
+                })
+            } catch (t: Throwable) {
+                fail("controller", t)
+                runOnUiThread { startLocalIfNeeded(url, title, pos) }
+            }
+        }, MoreExecutors.directExecutor())
+    }
+
+    /** Background service na bane to seedha yahin player — video phir bhi chale. */
+    private fun startLocalIfNeeded(url: String, title: String, pos: Long) {
+        if (started) return
+        try {
+            startLocal(url, title, pos)
+        } catch (t: Throwable) {
+            fail("localPlayer", t)
+            showErrPanel()
+            showNote("\u26a0\ufe0f Native player start nahi ho saka")
         }
     }
 
-    private fun setAspect(mode: String) {
+    private fun startLocal(url: String, title: String, pos: Long) {
+        val ua = try { android.webkit.WebSettings.getDefaultUserAgent(this) } catch (t: Throwable) { "Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile Safari/537.36" }
+        val base = DefaultHttpDataSource.Factory()
+            .setUserAgent(ua)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(20000)
+            .setAllowCrossProtocolRedirects(true)
+        val withCookies = ResolvingDataSource.Factory(base) { spec ->
+            val u = spec.uri.toString()
+            val hdrs = HashMap<String, String>()
+            try {
+                val ck = CookieManager.getInstance().getCookie(u)
+                if (!ck.isNullOrBlank()) hdrs["Cookie"] = ck
+            } catch (t: Throwable) {}
+            hdrs["Referer"] = "https://yaartera01234-web.github.io/"
+            spec.withRequestHeaders(hdrs)
+        }
+        val ds = DefaultDataSource.Factory(this, withCookies)
+        val p = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(ds)).build()
         try {
-            val mpv = mpvView?.mpv
-            when (mode) {
-                "contain" -> { mpv?.setString("video-aspect-override", "no"); mpv?.setString("panscan", "0.0") }
-                "cover" -> { mpv?.setString("panscan", "1.0") }
-                "16/9" -> mpv?.setString("video-aspect-override", "16:9")
-                "4/3" -> mpv?.setString("video-aspect-override", "4:3")
-                "Pan/Scan" -> mpv?.setString("panscan", "1.0")
+            p.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
+            p.setHandleAudioBecomingNoisy(true)
+        } catch (t: Throwable) {}
+        localPlayer = p
+        localMode = true
+        started = true
+        attach(p)
+        p.setMediaItem(mediaItem(url, title), pos)
+        p.prepare()
+        p.play()
+        logLine("local OK \u2014 playing")
+        setStatus("v37 \u2022 local player OK")
+        p.addListener(object : Player.Listener {
+            override fun onTracksChanged(tracks: Tracks) { try { refreshAudioBtn() } catch (t: Throwable) {} }
+            override fun onPlaybackStateChanged(state: Int) {
+                logLine("local state " + state)
+                setStatus("v37 \u2022 local \u2022 state " + state)
             }
-        } catch (e: Exception) {}
+            override fun onPlayerError(error: PlaybackException) {
+                showPlayErr("code " + error.errorCode + " \u2b1c " + error.errorCodeName)
+            }
+        })
     }
 
-    private fun setSpeed(txt: String) {
+    private fun cur(): Player? = controller ?: localPlayer
+
+    /* ---------------- v29: dual audio (track switch) ---------------- */
+
+    private fun audioList(p: Player): MutableList<Pair<androidx.media3.common.TrackGroup, Int>> {
+        val out = ArrayList<Pair<androidx.media3.common.TrackGroup, Int>>()
         try {
-            val s = txt.replace("x","").toDoubleOrNull() ?: 1.0
-            mpvView?.mpv?.setString("speed", s.toString())
-        } catch (e: Exception) {}
+            for (g in p.currentTracks.groups) {
+                if (g.type != C.TRACK_TYPE_AUDIO) continue
+                for (i in 0 until g.length) out.add(g.mediaTrackGroup to i)
+            }
+        } catch (t: Throwable) {}
+        return out
+    }
+
+    private fun audioCur(p: Player): Int {
+        try {
+            var k = 0
+            for (g in p.currentTracks.groups) {
+                if (g.type != C.TRACK_TYPE_AUDIO) continue
+                for (i in 0 until g.length) {
+                    if (g.isTrackSelected(i)) return k
+                    k++
+                }
+            }
+        } catch (t: Throwable) {}
+        return -1
+    }
+
+    private fun refreshAudioBtn() {
+        val p = cur() ?: return
+        val list = audioList(p); val idx = audioCur(p)
+        val b = audioBtn ?: return
+        b.text = if (list.size > 1) "\uD83D\uDD0A  " + (idx + 1).coerceAtLeast(1) + "/" + list.size else "\uD83D\uDD0A  Audio"
+    }
+
+    private fun cycleAudio() {
+        if (webMode) { showNote("\u26a0\ufe0f Is mode (page jaisa player) me dual audio nahi milta"); return }
+        val p = cur() ?: return
+        val list = audioList(p)
+        if (list.size <= 1) { showNote("\u26a0\ufe0f Is video me sirf ek hi audio hai"); return }
+        val curI = audioCur(p)
+        val nxt = ((curI + 1) % list.size + list.size) % list.size
+        val pair = list[nxt]
+        try {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setOverrideForType(TrackSelectionOverride(pair.first, pair.second))
+                .build()
+        } catch (t: Throwable) {}
+        refreshAudioBtn()
+        showHud("\uD83D\uDD0A", (nxt + 1) * 100 / list.size, "Audio " + (nxt + 1) + "/" + list.size)
+    }
+
+    /* ---------------- crop mode ---------------- */
+
+    private fun cycleMode() {
+        modeIdx = (modeIdx + 1) % modes.size
+        try { pv?.resizeMode = modes[modeIdx] } catch (t: Throwable) {}
+        if (webMode) webAspect()
+        modeBtn?.text = modeIcons[modeIdx] + "  " + modeNames[modeIdx]
+        try { prefs?.edit()?.putInt("mode", modeIdx)?.apply() } catch (e: Throwable) {}
+        showHud("\u26f6", (modeIdx + 1) * 33, modeNames[modeIdx])
+    }
+
+    /* ---------------- brightness + volume gestures ---------------- */
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        try {
+            val h = resources.displayMetrics.heightPixels.toFloat()
+            val w = resources.displayMetrics.widthPixels.toFloat()
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    gStartX = ev.x; gStartY = ev.y; gActive = false; gZone = 0
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = ev.y - gStartY
+                    val dx = ev.x - gStartX
+                    if (!gActive) {
+                        if (abs(dy) > dp(22).toFloat() && abs(dy) > abs(dx) * 1.5f) {
+                            gActive = true
+                            gZone = if (gStartX < w / 2f) 1 else 2
+                            gStartBright = currentBrightness()
+                            gStartVol = am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+                        }
+                    }
+                    if (gActive) {
+                        val pct = -dy / (h * 0.55f)          // upar = zyada
+                        if (gZone == 1) {
+                            val b = (gStartBright + pct).coerceIn(0.02f, 1f)
+                            applyBrightness(b)
+                            val percent = (b * 100f).roundToInt()
+                            showHud("\u2600\ufe0f", percent, "$percent%")
+                        } else {
+                            val nv = (gStartVol + pct * maxVol).roundToInt().coerceIn(0, maxVol)
+                            try { am?.setStreamVolume(AudioManager.STREAM_MUSIC, nv, 0) } catch (e: Throwable) {}
+                            val percent = ((nv * 100f) / maxVol).roundToInt()
+                            showHud("\uD83D\uDD0A", percent, "$nv/$maxVol")
+                        }
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (gActive) {
+                        gActive = false
+                        hideHudLater()
+                        return true
+                    }
+                }
+            }
+        } catch (t: Throwable) {}
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun currentBrightness(): Float {
+        val a = window.attributes
+        if (a.screenBrightness >= 0f) return a.screenBrightness
+        return try {
+            Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+        } catch (e: Throwable) { 0.5f }
+    }
+
+    private fun applyBrightness(b: Float) {
+        try {
+            val lp = window.attributes
+            lp.screenBrightness = b
+            window.attributes = lp
+        } catch (e: Throwable) {}
+    }
+
+    /* ---------------- HUD ---------------- */
+
+    private fun showHud(icon: String, percent: Int, label: String) {
+        runOnUiThread {
+            hudText?.text = "$icon  $label"
+            hudBar?.progress = percent.coerceIn(0, 100)
+            hud?.visibility = View.VISIBLE
+            hud?.removeCallbacks(hideRunnable)
+        }
+    }
+
+    private fun hideHudLater() {
+        hud?.postDelayed(hideRunnable, 900)
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).roundToInt()
-    override fun onDestroy() { try { mpvView?.destroy() } catch (e: Exception) {}; scope.cancel(); super.onDestroy() }
+
+    private fun showNote(msg: String) {
+        runOnUiThread {
+            note?.text = msg
+            note?.visibility = View.VISIBLE
+            try { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } catch (t: Throwable) {}
+        }
+    }
+
+    private fun immersive() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            try { window.setDecorFitsSystemWindows(false) } catch (t: Throwable) { fail("decorFits", t) }
+            /* v33: getWindowInsetsController() decor view na hone pe khud NPE deta hai -> poori tarah guard */
+            val ic = try { window.insetsController } catch (t: Throwable) { null }
+            if (ic != null) {
+                try {
+                    ic.hide(android.view.WindowInsets.Type.systemBars())
+                    ic.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    return
+                } catch (t: Throwable) { fail("hideBars", t) }
+            }
+            try {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
+            } catch (t: Throwable) { fail("legacyBars", t) }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                )
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) try { immersive() } catch (t: Throwable) {}
+    }
+
+    /* ---------------- error reporting (v32/v33) ---------------- */
+
+    private fun setStatus(msg: String) {
+        runOnUiThread {
+            try {
+                status2?.text = msg
+                status2?.visibility = View.VISIBLE
+            } catch (t: Throwable) {}
+        }
+    }
+
+    /** v37: playback fail hone pe screen pe saaf wajah + tap = page player (khud se band nahi hoti). */
+    private fun showPlayErr(why: String) {
+        logLine("playFail " + why + " | url=" + curUrl.take(150))
+        /* v37: pehla link nahi chala? doosra link khud try karo (self-test / mirror links) */
+        val a = altUrl
+        if (!altTried && !a.isNullOrBlank()) {
+            altTried = true
+            val p = cur()
+            if (p != null) {
+                try {
+                    logLine("trying ALT url")
+                    setStatus("v37 \u2022 alt link try ho raha hai\u2026")
+                    p.setMediaItem(mediaItem(a, curTitle))
+                    p.prepare()
+                    p.play()
+                    return
+                } catch (t: Throwable) {
+                    fail("altTry", t)
+                }
+            }
+        }
+        /* v37: WebView pehle hi try ho chuka hai -> yahan ExoPlayer ki wajah dikhao */
+        runOnUiThread {
+            try {
+                setStatus("v37 \u2022 FAIL: " + why)
+                val t = TextView(this).apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 12.5f
+                    setPadding(dp(14), dp(14), dp(14), dp(14))
+                    setBackgroundColor(0xF01A0B18.toInt())
+                    text = "\u26a0\ufe0f Native player ye link nahi chala\n" + why + "\n\n(Tap karo = page wala player)"
+                    isClickable = true
+                    setOnClickListener { finish() }
+                }
+                root?.addView(t, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.CENTER })
+                t.postDelayed({ try { finish() } catch (e: Throwable) {} }, 10000)
+            } catch (e: Throwable) {}
+        }
+    }
+
+    /* ================= v37: WEBVIEW PLAYER (guaranteed fallback) ================= */
+
+    private fun startWebFallback(url: String) {
+        try {
+            webMode = true
+            started = false
+            /* Media3 band karo taake double aawaz na ho */
+            try { controller?.stop() } catch (t: Throwable) {}
+            try { localPlayer?.pause() } catch (t: Throwable) {}
+            logLine("webview fallback: " + url.take(140))
+
+            val w = android.webkit.WebView(this)
+            w.setBackgroundColor(0xFF000000.toInt())
+            try {
+                w.settings.javaScriptEnabled = true
+                w.settings.domStorageEnabled = true
+                w.settings.mediaPlaybackRequiresUserGesture = false
+                w.settings.useWideViewPort = true
+                w.settings.loadWithOverviewMode = true
+                val ua = android.webkit.WebSettings.getDefaultUserAgent(this)
+                if (!ua.isNullOrBlank()) w.settings.userAgentString = ua
+            } catch (t: Throwable) { fail("webSettings", t) }
+            w.webChromeClient = android.webkit.WebChromeClient()
+            w.webViewClient = android.webkit.WebViewClient()
+            web = w
+            w.addJavascriptInterface(object {
+                @android.webkit.JavascriptInterface
+                fun playing() {
+                    webPlaying = true
+                    setStatus("v37 \u2022 video chal raha hai (page jaisa player)")
+                }
+
+                @android.webkit.JavascriptInterface
+                fun onErr(msg: String?) {
+                    logLine("webErr " + msg)
+                    runOnUiThread { startExoIfNeeded(curUrl, curTitle, 0L) }
+                }
+            }, "YaarPV")
+            root?.addView(w, FrameLayout.LayoutParams(-1, -1))
+            try {
+                modeBtn?.bringToFront()
+                audioBtn?.bringToFront()
+                status2?.bringToFront()
+                hud?.bringToFront()
+            } catch (t: Throwable) {}
+            w.loadDataWithBaseURL("https://yaartera01234-web.github.io/", webHtml(url), "text/html", "utf-8", null)
+            setStatus("v37 \u2022 webview player (page jaisa)")
+            /* aspect button ko shuru me fit kar do */
+            w.postDelayed({ webAspect() }, 800)
+        } catch (t: Throwable) {
+            fail("webView", t)
+        }
+    }
+
+    /** v37: WebView na chale (ya watchdog bole) to ExoPlayer route. */
+    private fun startExoIfNeeded(url: String, title: String, pos: Long) {
+        if (exoTried || !url.startsWith("http")) return
+        exoTried = true
+        started = false
+        webMode = false
+        logLine("webview -> ExoPlayer route")
+        setStatus("v37 \u2022 ExoPlayer try ho raha hai\u2026")
+        try { web?.stopLoading(); web?.visibility = View.GONE } catch (t: Throwable) {}
+        val ok = step("session") { startController(url, title, pos) }
+        if (ok) {
+            android.os.Handler(android.os.Looper.getMainLooper())
+                .postDelayed({ if (!started) startLocalIfNeeded(url, title, pos) }, 2600)
+        } else {
+            startLocalIfNeeded(url, title, pos)
+        }
+    }
+
+    private fun webHtml(u: String): String {
+        val src = org.json.JSONObject.quote(u)
+        return """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+video{width:100%;height:100%;object-fit:contain;background:#000;outline:none}
+#b{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:76px;height:76px;border-radius:50%;
+background:linear-gradient(135deg,#ff5ebc,#8b72ff);display:none;place-items:center;font-size:32px;color:#fff;z-index:9;
+box-shadow:0 10px 30px rgba(0,0,0,.5)}</style></head>
+<body><video id="v" playsinline controls autoplay preload="metadata"></video><div id="b">&#9654;</div>
+<script>
+var v=document.getElementById('v'), b=document.getElementById('b');
+v.src=""" + src + """;
+window.pvAspect=function(m){ v.style.objectFit=(m==='zoom'?'cover':(m==='fill'?'fill':'contain')); };
+window.pvBright=function(x){ v.style.filter='brightness('+x+')'; };
+window.pvPlay=function(){ try{ v.play(); }catch(e){} };
+try{ v.volume=1; v.play(); }catch(e){}
+setTimeout(function(){ if(v.paused){ b.style.display='grid'; } },1500);
+b.onclick=function(){ try{ v.play(); }catch(e){} b.style.display='none'; };
+v.addEventListener('playing',function(){ b.style.display='none'; try{ window.YaarPV && window.YaarPV.playing(); }catch(e){} });
+v.addEventListener('error',function(){ try{ window.YaarPV && window.YaarPV.onErr('media error'); }catch(e){} });
+</script></body></html>"""
+    }
+
+    private fun webAspect() {
+        val m = when (modeIdx) { 0 -> "fit"; 1 -> "fill"; else -> "zoom" }
+        try { web?.evaluateJavascript("window.pvAspect && window.pvAspect('" + m + "')", null) } catch (t: Throwable) {}
+    }
+
+    private fun logLine(msg: String) {
+        try {
+            getFileStreamPath("crash.txt").appendText("\n[" + Date() + "] v33 " + msg + "\n")
+        } catch (e: Throwable) {}
+    }
+
+
+    private fun step(name: String, block: () -> Unit): Boolean {
+        return try {
+            block()
+            true
+        } catch (t: Throwable) {
+            fail(name, t)
+            false
+        }
+    }
+
+    private fun fail(name: String, t: Throwable) {
+        try {
+            stepErrs.append("\n\u2022 ").append(name).append(": ").append(t.message ?: t.javaClass.name)
+        } catch (e: Throwable) {}
+        try {
+            val sw = java.io.StringWriter()
+            t.printStackTrace(java.io.PrintWriter(sw))
+            val f = getFileStreamPath("crash.txt")
+            f.appendText("\n[" + Date() + "] v32 " + name + "\n" + sw.toString().take(1200) + "\n")
+        } catch (e: Throwable) {}
+    }
+
+    private fun showErrPanel() {
+        runOnUiThread {
+            try {
+                val r = root
+                if (r == null || errText != null) return@runOnUiThread
+                val t = TextView(this).apply {
+                    setTextColor(0xFFFFD9E6.toInt())
+                    textSize = 11.5f
+                    setPadding(dp(14), dp(14), dp(14), dp(14))
+                    setBackgroundColor(0xF0100A1E.toInt())
+                    text = "NATIVE PLAYER \u2014 v37 error\n" + stepErrs.toString().take(900) + "\n\n(koi bhi jagah tap = yeh hata do)"
+                    setOnClickListener { visibility = View.GONE }
+                }
+                errText = t
+                r.addView(t, FrameLayout.LayoutParams(-1, -2).apply {
+                    gravity = Gravity.TOP
+                    topMargin = dp(64)
+                })
+                if (started) t.postDelayed({ try { t.visibility = View.GONE } catch (e: Throwable) {} }, 12000)
+            } catch (e: Throwable) {}
+        }
+    }
+
+    /* ---------------- lifecycle end ---------------- */
+
+    override fun onStop() {
+        super.onStop()
+        val c = controller
+        if (c != null) {
+            try { if (isFinishing) c.pause() } catch (t: Throwable) {}
+            controllerFuture?.let { runCatching { MediaController.releaseFuture(it) } }
+            controllerFuture = null
+            controller = null
+        }
+        if (localMode) {
+            /* Background me chalne ke liye service wala player behtar hai; local chalta rahe jab tak activity zinda hai. */
+            if (isFinishing) runCatching { localPlayer?.pause() }
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            if (localMode) {
+                runCatching { localPlayer?.release() }
+            }
+        } catch (t: Throwable) {}
+        localPlayer = null
+        try {
+            web?.stopLoading()
+            web?.destroy()
+        } catch (t: Throwable) {}
+        web = null
+        super.onDestroy()
+    }
 }
