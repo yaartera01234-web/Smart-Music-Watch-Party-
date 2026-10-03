@@ -13,7 +13,8 @@ import android.widget.TextView
 import kotlinx.coroutines.*
 import org.schabi.newpipe.extractor.ServiceList
 import io.github.yuroyami.libmpvkt.view.MpvView
-import io.github.yuroyami.libmpvkt.MpvOptions
+import io.github.yuroyami.libmpvkt.view.MpvOptions
+import kotlin.math.roundToInt
 
 class PlayerActivity : Activity() {
     private var mpvView: MpvView? = null
