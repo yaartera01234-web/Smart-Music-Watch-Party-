@@ -10,8 +10,8 @@ android {
         applicationId = "app.party.music"
         minSdk = 24
         targetSdk = 35
-        versionCode = 51
-        versionName = "51-MPV-0.3.0-Hybrid"
+        versionCode = 52
+        versionName = "52-MPV-0.3.0-Hybrid"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     buildTypes {
@@ -29,7 +29,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
 
 dependencies {
