@@ -1,754 +1,595 @@
 package app.party.music
 
-import android.Manifest
-import android.annotation.SuppressLint
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Activity
-import android.app.PictureInPictureParams
-import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
-import android.media.AudioManager
-import android.media.AudioDeviceInfo
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.Bundle
-import android.util.Log
 import android.view.Gravity
 import android.view.View
-import android.webkit.CookieManager
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.WebResourceResponse
-import android.webkit.PermissionRequest
-import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
-import java.io.ByteArrayInputStream
-import java.io.PrintWriter
-import java.io.StringWriter
-import java.util.Date
+import android.widget.*
+import kotlinx.coroutines.*
+import org.schabi.newpipe.extractor.ServiceList
+import io.github.yuroyami.libmpvkt.view.MpvView
+import io.github.yuroyami.libmpvkt.view.MpvOptions
+import kotlin.math.roundToInt
 
 /**
- * Hosts the watch-party web app in a WebView.
- *
- * Background strategy: Picture-in-Picture. When the user leaves (home button), the activity
- * continues as the system's little PiP window, so the WebView never becomes "hidden" and
- * Chromium keeps the party sounding — the same mechanism YouTube's own app uses. The foreground
- * service + wake lock additionally keep the process and CPU alive.
- *
- * A global crash handler writes any fatal error to crash.txt; on the next launch the trace is
- * shown briefly (8s) so it can be photographed, then cleared.
+ * PURE NATIVE MPV PARTY - No WebView, No Premium Player, No Iframe
+ * Design = Smart-Music-Watch-Party exact (join-card 24px, avatar 66dp, player-wrap 198px, playlist 48px collapsed / 380px open, chat below)
+ * Player = Watch-Party-Mpv exact clone (purple play #c026d3 64dp, contain/cover/16:9/4:3/Pan-Scan, Volume/Brightness purple sliders, Speed, Audio delay)
+ * MPV 0.3.0 official yuroyami.github.io/maven - HW AV1, FFmpeg 9.0.1
+ * Package app.smart.mpv.party side-by-side with original app.party.music
  */
 class MainActivity : Activity() {
+    private var mpvView: MpvView? = null
+    private var root: FrameLayout? = null
+    private var joinCard: LinearLayout? = null
+    private var partyUi: LinearLayout? = null
+    private var titleView: TextView? = null
+    private var timeView: TextView? = null
+    private var playBtn: TextView? = null
+    private var centerPlay: FrameLayout? = null
+    private var audioPanel: LinearLayout? = null
+    private var settingsPanel: LinearLayout? = null
+    private var playlistContainer: LinearLayout? = null
+    private var playlistList: LinearLayout? = null
+    private var chatList: LinearLayout? = null
+    private var isPlaying = false
+    private var isPlaylistExpanded = false
+    private var currentTitle = "MPV Party"
+    private val playlist = mutableListOf<Pair<String,String>>() // title to url
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private lateinit var root: FrameLayout
-    private lateinit var web: GifWebView
-    private lateinit var splash: LinearLayout
-    private lateinit var status: TextView
-    private lateinit var pipCover: TextView
-    private lateinit var banner: TextView
-    private var customView: View? = null
-    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-    private var fileCallback: ValueCallback<Array<android.net.Uri>>? = null
-    private var pendingWebPerm: PermissionRequest? = null
-    private var pendingIncomingCallAction: Pair<String, String>? = null
-    private var pageLoaded = false
-    private var resumed = false
-    private var callAudioActive = false
-    private var callOriginalMode = AudioManager.MODE_NORMAL
-    private var callOriginalSpeaker = false
-    private var callOriginalDevice: AudioDeviceInfo? = null
-
-    /* v30: native player ka apna (Android) button + auto-detect — page ke JS pe bharosa nahi */
-    private var nBtn: TextView? = null
-    private var lastAutoUrl = ""
-
-    /* v27: app background/band hone pe DM notifications ke liye chhupa WebView service */
-    private val bgHandler = Handler(Looper.getMainLooper())
-    private val bgStarter = Runnable {
-        try { BgNotifyService.start(this) } catch (t: Throwable) { Log.e("MusicParty", "bg start fail", t) }
-    }
-
-    private val url = "https://yaartera01234-web.github.io/watch-party/party-final1.html"
-
-    private val AD_HOSTS = listOf(
-        "doubleclick.net",
-        "googlesyndication.com",
-        "googleadservices.com",
-        "/pagead",
-        "imasdk.googleapis.com",
-        "googleads.g.",
-        "googletagservices.com",
-        "adservice.google.com"
-    )
-
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingIncomingCallAction = parseIncomingCallAction(intent)
+        buildPureNativeUi()
+    }
 
-        // Self-reporting crashes: write trace to a file, show it briefly next launch.
-        Thread.setDefaultUncaughtExceptionHandler { _, error ->
-            runCatching {
-                val sw = StringWriter()
-                error.printStackTrace(PrintWriter(sw))
-                getFileStreamPath("crash.txt").writeText("${Date()}\n${sw}")
+    private fun buildPureNativeUi() {
+        val r = FrameLayout(this)
+        r.setBackgroundColor(Color.parseColor("#0d0716"))
+        root = r
+
+        // ========== JOIN SCREEN ==========
+        val join = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(24).toFloat()
+                setColor(Color.parseColor("#1a1228"))
+                setStroke(dp(1), Color.parseColor("#2a1a3a"))
             }
-            android.os.Process.killProcess(android.os.Process.myPid())
+            elevation = dp(8).toFloat()
         }
+        joinCard = join
 
-        root = FrameLayout(this)
-        root.setBackgroundColor(Color.parseColor("#0d0716"))
-
-        web = GifWebView(this)
-        web.setBackgroundColor(Color.parseColor("#0d0716"))
-        root.addView(web, FrameLayout.LayoutParams(-1, -1))
-
-        // Branded, professional loading screen: icon + spinner + pulsing label.
-        splash = LinearLayout(this)
-        splash.orientation = LinearLayout.VERTICAL
-        splash.gravity = Gravity.CENTER
-        val logo = ImageView(this)
-        logo.setImageDrawable(getDrawable(R.drawable.app_icon))
-        val lp = LinearLayout.LayoutParams(dp(96), dp(96))
-        logo.layoutParams = lp
-        splash.addView(logo)
-        val spin = ProgressBar(this)
-        val spp = LinearLayout.LayoutParams(dp(34), dp(34))
-        spp.topMargin = dp(18)
-        spin.layoutParams = spp
-        splash.addView(spin)
-        val loading = TextView(this)
-        loading.text = "L O A D I N G"
-        loading.setTextColor(Color.parseColor("#c86bd8"))
-        loading.textSize = 13f
-        loading.letterSpacing = 0.3f
-        val ltp = LinearLayout.LayoutParams(-2, -2)
-        ltp.topMargin = dp(14)
-        loading.layoutParams = ltp
-        splash.addView(loading)
-        loading.alpha = 0.4f
-        loading.animate().setDuration(900).alpha(1f).setInterpolator(
-            android.view.animation.AccelerateDecelerateInterpolator()
-        ).withEndAction {
-            loading.animate().setDuration(900).alpha(0.4f).withEndAction { pulse(loading) }
-        }.start()
-        val slp = FrameLayout.LayoutParams(-1, -1)
-        root.addView(splash, slp)
-
-        // Errors / one-time crash banner only.
-        status = TextView(this)
-        status.setTextColor(Color.WHITE)
-        status.textSize = 14f
-        val sp = FrameLayout.LayoutParams(-2, -2)
-        sp.gravity = Gravity.CENTER
-        root.addView(status, sp)
-        status.visibility = View.GONE
-
-        // Dark music bubble shown only inside PiP (the page's own UI reads like a video call).
-        pipCover = TextView(this)
-        pipCover.setBackgroundColor(Color.parseColor("#12081f"))
-        pipCover.setTextColor(Color.parseColor("#ff5fa2"))
-        pipCover.textSize = 22f
-        pipCover.gravity = Gravity.CENTER
-        pipCover.text = "♪ Party ON"
-        pipCover.visibility = View.GONE
-        root.addView(pipCover, FrameLayout.LayoutParams(-1, -1))
-
-        // Branded replacement for the page's raw JS alerts (connection notices etc.).
-        banner = TextView(this)
-        banner.setTextColor(Color.WHITE)
-        banner.textSize = 13f
-        banner.setPadding(dp(18), dp(12), dp(18), dp(12))
-        val bg = android.graphics.drawable.GradientDrawable()
-        bg.setColor(Color.parseColor("#e612081f"))
-        bg.setStroke(dp(1), Color.parseColor("#ff5fa2"))
-        bg.cornerRadius = dp(14).toFloat()
-        banner.background = bg
-        banner.visibility = View.GONE
-        val bnp = FrameLayout.LayoutParams(-2, -2)
-        bnp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-        bnp.bottomMargin = dp(34)
-        root.addView(banner, bnp)
-
-        /* v38: native player BAND (user: "native ko dafa kro") — android ka ⛶ button
-           aur auto-open poller hata diya. Ab sirf premium (page wala) player chalta hai. */
-
-
-        setContentView(root, FrameLayout.LayoutParams(-1, -1))
-
-        // Purane internal crash notes ko silently discard karo; raw stack trace kabhi screen par nahi.
-        runCatching { getFileStreamPath("crash.txt").delete() }
-
-        // Full cookie support so logged-in sessions and the iframe player behave normally.
-        val cookieManager = CookieManager.getInstance()
-        cookieManager.setAcceptCookie(true)
-        cookieManager.setAcceptThirdPartyCookies(web, true)
-
-        web.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            mediaPlaybackRequiresUserGesture = false
-            javaScriptCanOpenWindowsAutomatically = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            // Desktop Chrome identity — the exact combo that tested working (v10/v15): YouTube
-            // played without the sign-in wall on it.
-            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        // Avatar 66dp
+        val avatarWrap = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#2a1a3a"))
+                setStroke(dp(2), Color.parseColor("#c026d3"))
+            }
         }
-        web.webViewClient = object : WebViewClient() {
-            // v20 me AD_HOSTS list bani thi magar use kabhi nahi hui — yahan asal blocking.
-            // Sirf sub-resources block hote hain (main page kabhi nahi). YouTube ke andar wale
-            // ads ka kuch hissa isse skip ho jata hai; video/ads dono ke apne googlevideo.com
-            // domain ko chhua nahi jata (warna playback hi ruk jati).
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                val r = request ?: return null
-                if (r.isForMainFrame) return null
-                val host = r.url.host ?: ""
-                val full = r.url.toString()
-                val blocked = AD_HOSTS.any { h ->
-                    if (h.startsWith("/")) full.contains(h) else host.contains(h)
-                }
-                if (!blocked) return null
-                return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
-            }
+        val avatarTxt = TextView(this).apply {
+            text = "🎵"
+            textSize = 28f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+        }
+        avatarWrap.addView(avatarTxt, FrameLayout.LayoutParams(-1,-1))
+        join.addView(avatarWrap, LinearLayout.LayoutParams(dp(66), dp(66)).apply { gravity = Gravity.CENTER; bottomMargin = dp(16) })
 
-            override fun onPageFinished(view: WebView?, pageUrl: String?) {
-                splash.visibility = View.GONE
-                pageLoaded = true
-                dispatchIncomingCallAction()
-            }
+        val appTitle = TextView(this).apply {
+            text = "Smart MPV Party"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            letterSpacing = 0.05f
+        }
+        join.addView(appTitle, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(4) })
 
-            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                if (request?.isForMainFrame == true) {
-                    splash.visibility = View.GONE
-                    status.text = "Page load nahi hui — internet check karein."
-                    status.visibility = View.VISIBLE
+        val subTitle = TextView(this).apply {
+            text = "MPV 0.3.0 • No Premium • Pure Native"
+            setTextColor(Color.parseColor("#c026d3"))
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.12f
+        }
+        join.addView(subTitle, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(24) })
+
+        fun makeInput(hint: String): EditText {
+            return EditText(this@MainActivity).apply {
+                this.hint = hint
+                setHintTextColor(Color.parseColor("#666666"))
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(Color.parseColor("#0a0a0a"))
+                    setStroke(dp(1), Color.parseColor("#2a2a2a"))
                 }
             }
         }
-        web.webChromeClient = object : WebChromeClient() {
-            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                customView?.let { (it.parent as? FrameLayout)?.removeView(it) }
-                customView = view
-                customViewCallback = callback
-                root.addView(view, FrameLayout.LayoutParams(-1, -1))
-                web.visibility = View.GONE
-            }
 
-            override fun onHideCustomView() {
-                customView?.let { (it.parent as? FrameLayout)?.removeView(it) }
-                customViewCallback?.onCustomViewHidden()
-                customView = null
-                customViewCallback = null
-                web.visibility = View.VISIBLE
-            }
+        val nameInput = makeInput("Your name")
+        join.addView(nameInput, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(12) })
 
-            // v25: page 🎤 (getUserMedia) -> WebView ka audio-capture request grant karo
-            override fun onPermissionRequest(request: PermissionRequest) {
-                val wantsAudio = request.resources.any { it == PermissionRequest.RESOURCE_AUDIO_CAPTURE }
-                if (!wantsAudio) { request.deny(); return }
-                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                    request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-                } else {
-                    pendingWebPerm = request
-                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
-                }
-            }
+        val roomInput = makeInput("Room code (e.g. party123)")
+        join.addView(roomInput, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(20) })
 
-            // The page's raw JS alert() (e.g. "tower se jur raha hai") becomes a branded banner.
-            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult): Boolean {
-                showBanner(message ?: "")
-                result.confirm()
-                return true
-            }
-
-            // The page's Photo/DP button: open the system picker and hand the choice back.
-            override fun onShowFileChooser(
-                webView: WebView?,
-                callback: ValueCallback<Array<android.net.Uri>>?,
-                params: FileChooserParams?
-            ): Boolean {
-                fileCallback?.onReceiveValue(null)
-                fileCallback = callback
-                val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "image/*"
-                }
-                return try {
-                    startActivityForResult(Intent.createChooser(pick, "Photo chunein"), 777)
-                    true
-                } catch (t: Throwable) {
-                    fileCallback?.onReceiveValue(null)
-                    fileCallback = null
-                    false
-                }
+        val joinBtn = TextView(this).apply {
+            text = "JOIN PARTY ▶"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(Color.parseColor("#c026d3"))
             }
         }
-        WebView.setWebContentsDebuggingEnabled(true)
+        join.addView(joinBtn, LinearLayout.LayoutParams(-1, dp(50)))
 
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        }
-        // v25: voice message ke liye mic (page getUserMedia use karta hai)
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
+        val joinWrap = FrameLayout(this).apply {
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            addView(join, FrameLayout.LayoutParams(-1,-2).apply { gravity = Gravity.CENTER })
         }
 
-        try {
-            MusicService.start(this)
-        } catch (t: Throwable) {
-            Log.e("MusicParty", "service start failed", t)
+        r.addView(joinWrap, FrameLayout.LayoutParams(-1,-1))
+
+        // ========== PARTY UI (after join) ==========
+        val party = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setBackgroundColor(Color.parseColor("#0d0716"))
         }
+        partyUi = party
 
-        // v25 bridge: page se native player kholne ke liye (window.YaarNative.openPlayer)
-        web.addJavascriptInterface(object {
-            @android.webkit.JavascriptInterface
-            fun openPlayer(videoUrl: String, title: String?) {
-                runOnUiThread {
-                    try {
-                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java).apply {
-                            putExtra("url", videoUrl)
-                            putExtra("title", title ?: "Video")
-                        })
-                    } catch (t: Throwable) {
-                        showBanner("⚠️ Native player nahi khula")
-                    }
-                }
-            }
+        // Top bar
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)); setBackgroundColor(Color.parseColor("#0d0716")) }
+        val backBtn = TextView(this).apply { text = "←"; setTextColor(Color.WHITE); textSize = 18f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { showJoin() } }
+        top.addView(backBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(10) })
+        val titleCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val t = TextView(this).apply { text = "🎬 $currentTitle"; setTextColor(Color.WHITE); textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        titleView = t
+        val tm = TextView(this).apply { text = "MPV 0.3.0 • 0:00 / 0:00"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 12f }
+        timeView = tm
+        titleCol.addView(t); titleCol.addView(tm)
+        top.addView(titleCol, LinearLayout.LayoutParams(0, -2, 1f))
+        val pipBtn = TextView(this).apply { text = "⧉"; setTextColor(Color.WHITE); textSize = 18f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(10), dp(8), dp(10), dp(8)); setOnClickListener { enterPip() } }
+        top.addView(pipBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        party.addView(top, LinearLayout.LayoutParams(-1, -2))
 
-            /* v26: DM notification — page se aati hai, sirf jab app saamne na ho */
-            @android.webkit.JavascriptInterface
-            fun notify(title: String?, text: String?) { postNote(title, text, null) }
-
-            /* v40: notification me "Reply" button -> jawab isi WebView ke page se jayega */
-            @android.webkit.JavascriptInterface
-            fun notifyFrom(title: String?, text: String?, code: String?) {
-                registerForegroundReplyTarget()
-                postNote(title, text, code)
-            }
-
-            @android.webkit.JavascriptInterface
-            fun replyResult(requestId: String?, sent: Boolean) {
-                if (!requestId.isNullOrEmpty()) NotifHub.completeReply(requestId, sent)
-            }
-
-            /* v44: WebRTC call ke liye earpiece / speaker route (foreground only). */
-            @android.webkit.JavascriptInterface
-            fun setCallAudioRoute(speaker: Boolean) { this@MainActivity.setCallAudioRoute(speaker) }
-
-            @android.webkit.JavascriptInterface
-            fun resetCallAudioRoute() { this@MainActivity.resetCallAudioRoute() }
-
-            @android.webkit.JavascriptInterface
-            fun startOngoingCall(): Boolean {
-                return try { CallForegroundService.start(this@MainActivity); true }
-                catch (t: Throwable) { Log.e("MusicParty", "call foreground service start failed", t); false }
-            }
-
-            @android.webkit.JavascriptInterface
-            fun stopOngoingCall() { CallForegroundService.stop(this@MainActivity) }
-
-            @android.webkit.JavascriptInterface
-            fun showIncomingCall(caller: String?, callId: String?): Boolean {
-                return try {
-                    if (callId.isNullOrEmpty()) false else {
-                        CallForegroundService.showIncoming(this@MainActivity, caller ?: "Private contact", callId)
-                        true
-                    }
-                } catch (t: Throwable) { Log.e("MusicParty", "incoming call alert failed", t); false }
-            }
-
-            @android.webkit.JavascriptInterface
-            fun clearIncomingCall() { CallForegroundService.stop(this@MainActivity) }
-
-            @android.webkit.JavascriptInterface
-            fun appVersion(): Int = 41
-        }, "YaarNative")
-        registerForegroundReplyTarget()
-
-        // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
-        web.onGif = { gifUrl ->
-            val safe = gifUrl.replace("\\", "").replace("'", "\\'")
-            web.post { web.evaluateJavascript("window.wpSendGif && window.wpSendGif('" + safe + "')", null) }
+        // Player wrap 198px exact from Figma sample
+        val playerWrap = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
         }
-        web.onGifError = { msg -> showBanner(msg) }
+        val mpv = MpvView(this)
+        mpvView = mpv
+        try { mpv.initialize(MpvOptions()) } catch (e: Exception) {}
+        playerWrap.addView(mpv, FrameLayout.LayoutParams(-1, -1))
 
-        // GitHub Pages HTML ko ~10 min cache karta hai + WebView bhi cache karta hai.
-        // Har launch pe naya query lagane se page TAZA aata hai, warna naye fixes app me
-        // dikhte hi nahi (assets/libs cache me rehte hain, sirf ~100KB page dobara aata hai).
-        web.loadUrl(url + "?v=" + System.currentTimeMillis())
-    }
-
-    private fun parseIncomingCallAction(source: Intent?): Pair<String, String>? {
-        val method = when (source?.action) {
-            CallForegroundService.ACTION_ANSWER_INCOMING -> "yaarAnswerIncomingCall"
-            CallForegroundService.ACTION_DECLINE_INCOMING -> "yaarDeclineIncomingCall"
-            else -> return null
+        // Center play 110dp OVAL border #ffffff1a
+        val center = FrameLayout(this).apply {
+            val inner = TextView(this@MainActivity).apply { text = "▶"; setTextColor(Color.WHITE); textSize = 32f; gravity = Gravity.CENTER }
+            addView(inner, FrameLayout.LayoutParams(-1, -1))
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setStroke(dp(1), Color.parseColor("#ffffff1a")); setColor(Color.parseColor("#00000066")) }
         }
-        // Boss fix: top se Accept/Decline pe ring band karo - simple cancel, JS se proper stop hoga
-        try {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-            nm.cancel(9043)
-        } catch (_: Throwable) {}
-        return method to (source?.getStringExtra(CallForegroundService.EXTRA_CALL_ID) ?: "")
-    }
+        centerPlay = center
+        center.setOnClickListener { togglePlay() }
+        playerWrap.addView(center, FrameLayout.LayoutParams(dp(110), dp(110)).apply { gravity = Gravity.CENTER })
 
-    private fun dispatchIncomingCallAction() {
-        val action = pendingIncomingCallAction ?: return
-        if (!::web.isInitialized || !pageLoaded) return
-        pendingIncomingCallAction = null
-        val callId = org.json.JSONObject.quote(action.second)
-        web.post { web.evaluateJavascript("window.${action.first} && window.${action.first}($callId)", null) }
-    }
+        // Premium badge replaced with MPV badge 9px 900 letter-spacing 1.2px
+        val badge = TextView(this).apply {
+            text = "MPV 0.3.0"
+            setTextColor(Color.WHITE)
+            textSize = 9f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.12f
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Color.parseColor("#c026d3")) }
+        }
+        playerWrap.addView(badge, FrameLayout.LayoutParams(-2,-2).apply { gravity = Gravity.TOP or Gravity.START; leftMargin = dp(8); topMargin = dp(8) })
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        pendingIncomingCallAction = parseIncomingCallAction(intent)
-        dispatchIncomingCallAction()
-    }
+        party.addView(playerWrap, LinearLayout.LayoutParams(-1, dp(198)))
 
-    private fun registerForegroundReplyTarget() {
-        try {
-            NotifHub.setReplyTarget("fg") { code, text, requestId ->
-                web.post {
-                    try { web.evaluateJavascript(NotifHub.quickReplyJs(requestId, code, text), null) } catch (t: Throwable) {
-                        NotifHub.completeReply(requestId, false)
-                    }
-                }
-            }
-        } catch (t: Throwable) { Log.e("MusicParty", "foreground reply target registration failed", t) }
-    }
+        // Bottom controls below player
+        val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(12)); setBackgroundColor(Color.parseColor("#0d0716")) }
+        val prog = SeekBar(this).apply {
+            max = 1000; progress = 0
+            thumb = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(Color.WHITE); setSize(dp(18), dp(18)) }
+        }
+        bottom.addView(prog, LinearLayout.LayoutParams(-1, dp(24)))
+        val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tl = TextView(this).apply { text = "0:00"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 12f }
+        val tr = TextView(this).apply { text = "-0:00"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 12f; gravity = Gravity.END }
+        timeRow.addView(tl, LinearLayout.LayoutParams(0, -2, 1f))
+        timeRow.addView(tr, LinearLayout.LayoutParams(0, -2, 1f))
+        bottom.addView(timeRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
 
-    @Suppress("DEPRECATION")
-    private fun setCallAudioRoute(speaker: Boolean) {
-        runOnUiThread {
-            try {
-                val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                if (!callAudioActive) {
-                    callOriginalMode = audio.mode
-                    callOriginalSpeaker = audio.isSpeakerphoneOn
-                    callOriginalDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audio.communicationDevice else null
-                    callAudioActive = true
-                }
-                audio.mode = AudioManager.MODE_IN_COMMUNICATION
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val devices = audio.availableCommunicationDevices
-                    val target = if (speaker) {
-                        devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    } else {
-                        callOriginalDevice?.takeIf { old -> old.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER && devices.any { it.id == old.id } }
-                            ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
-                    }
-                    if (target != null) audio.setCommunicationDevice(target)
-                    else if (speaker) audio.isSpeakerphoneOn = true
-                    else audio.clearCommunicationDevice()
-                } else {
-                    audio.isSpeakerphoneOn = speaker
-                }
-            } catch (t: Throwable) {
-                Log.w("MusicParty", "call audio route failed", t)
+        val ctrlRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        fun makeCtrl(txt: String, purple: Boolean = false): TextView {
+            return TextView(this@MainActivity).apply {
+                text = txt; setTextColor(Color.WHITE); textSize = 20f; gravity = Gravity.CENTER
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(if (purple) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }
             }
         }
-    }
+        val rew = makeCtrl("↻")
+        val play = makeCtrl("▶", true).apply { setPadding(dp(18), dp(14), dp(18), dp(14)); textSize = 22f }
+        playBtn = play
+        play.setOnClickListener { togglePlay() }
+        val fwd = makeCtrl("↺")
+        val audio = makeCtrl("〰️").apply { setOnClickListener { audioPanel?.visibility = View.VISIBLE; settingsPanel?.visibility = View.GONE } }
+        val settings = makeCtrl("⚙️").apply { setOnClickListener { settingsPanel?.visibility = View.VISIBLE; audioPanel?.visibility = View.GONE } }
+        val fs = makeCtrl("⤢").apply { setOnClickListener { startActivity(Intent(this@MainActivity, PlayerActivity::class.java).apply { putExtra("url", playlist.lastOrNull()?.second ?: ""); putExtra("title", playlist.lastOrNull()?.first ?: "MPV") }) } }
+        ctrlRow.addView(rew, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
+        ctrlRow.addView(play, LinearLayout.LayoutParams(dp(64), dp(64)).apply { rightMargin = dp(8) })
+        ctrlRow.addView(fwd, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(16) })
+        ctrlRow.addView(audio, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
+        ctrlRow.addView(settings, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
+        ctrlRow.addView(fs, LinearLayout.LayoutParams(dp(48), dp(48)))
+        bottom.addView(ctrlRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12); gravity = Gravity.CENTER })
+        party.addView(bottom, LinearLayout.LayoutParams(-1, -2))
 
-    @Suppress("DEPRECATION")
-    private fun resetCallAudioRoute() {
-        val restore = Runnable {
-            try {
-                val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                // Force normal mode - fixes volume zero but song 100% bug (was stuck in IN_COMMUNICATION)
-                try { audio.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
-                try { audio.isSpeakerphoneOn = false } catch (_: Throwable) {}
-                try { audio.isMicrophoneMute = false } catch (_: Throwable) {}
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try { audio.clearCommunicationDevice() } catch (_: Throwable) {}
-                }
-                try { audio.abandonAudioFocus(null) } catch (_: Throwable) {}
-                callAudioActive = false
-                callOriginalDevice = null
-                // Re-take media focus to ensure media stream (not call stream)
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        val focusReq = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                            .setAudioAttributes(
-                                android.media.AudioAttributes.Builder()
-                                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                                    .build()
-                            ).build()
-                        try { audio.requestAudioFocus(focusReq) } catch (_: Throwable) {}
-                        // Immediately abandon to reset
-                        try { audio.abandonAudioFocusRequest(focusReq) } catch (_: Throwable) {}
-                    }
-                } catch (_: Throwable) {}
-                // Force 3 times with delay - ensures media volume controls work
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        val a2 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        a2.mode = AudioManager.MODE_NORMAL
-                        a2.isSpeakerphoneOn = false
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            try { a2.clearCommunicationDevice() } catch (_: Throwable) {}
-                        }
-                        try { a2.abandonAudioFocus(null) } catch (_: Throwable) {}
-                    } catch (_: Throwable) {}
-                }, 400)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        val a3 = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        a3.mode = AudioManager.MODE_NORMAL
-                        a3.isSpeakerphoneOn = false
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            try { a3.clearCommunicationDevice() } catch (_: Throwable) {}
-                        }
-                    } catch (_: Throwable) {}
-                }, 1200)
-            } catch (t: Throwable) {
-                Log.w("MusicParty", "call audio restore failed", t)
-                callAudioActive = false
-                callOriginalDevice = null
+        // Playlist box 48px collapsed / 380px open
+        val playlistBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#1a1228"))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        playlistContainer = playlistBox
+        val playlistHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val playlistTitle = TextView(this).apply { text = "📋 Playlist (MPV)"; setTextColor(Color.WHITE); textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        val playlistExpand = TextView(this).apply { text = "▼"; setTextColor(Color.parseColor("#c026d3")); textSize = 14f; gravity = Gravity.CENTER; setPadding(dp(8), dp(4), dp(8), dp(4)) }
+        playlistHeader.addView(playlistTitle, LinearLayout.LayoutParams(0,-2,1f))
+        playlistHeader.addView(playlistExpand, LinearLayout.LayoutParams(dp(32), dp(32)))
+        playlistBox.addView(playlistHeader, LinearLayout.LayoutParams(-1,-2))
+
+        val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, dp(8)) }
+        val urlInput = EditText(this).apply {
+            hint = "YouTube / MP4 / MKV / M3U8 URL"
+            setHintTextColor(Color.parseColor("#666666"))
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(Color.parseColor("#0a0a0a")); setStroke(dp(1), Color.parseColor("#2a2a2a")) }
+        }
+        val addBtn = TextView(this).apply {
+            text = "ADD"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(Color.parseColor("#c026d3")) }
+        }
+        addRow.addView(urlInput, LinearLayout.LayoutParams(0,-2,1f).apply { rightMargin = dp(8) })
+        addRow.addView(addBtn, LinearLayout.LayoutParams(-2,-2))
+        playlistBox.addView(addRow, LinearLayout.LayoutParams(-1,-2))
+
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        playlistList = list
+        playlistBox.addView(list, LinearLayout.LayoutParams(-1,-2))
+
+        playlistHeader.setOnClickListener {
+            isPlaylistExpanded = !isPlaylistExpanded
+            playlistExpand.text = if (isPlaylistExpanded) "▲" else "▼"
+            val lp = playlistBox.layoutParams
+            lp.height = if (isPlaylistExpanded) dp(380) else dp(48 + 56) // header + add row
+            playlistBox.layoutParams = lp
+            list.visibility = if (isPlaylistExpanded) View.VISIBLE else View.GONE
+        }
+        // default collapsed
+        playlistBox.layoutParams = LinearLayout.LayoutParams(-1, dp(48+56))
+        list.visibility = View.GONE
+
+        addBtn.setOnClickListener {
+            val u = urlInput.text.toString().trim()
+            if (u.isBlank()) return@setOnClickListener
+            val title = if (u.contains("youtu")) "YouTube 360p" else "Video ${playlist.size+1}"
+            addToPlaylist(title, u)
+            urlInput.setText("")
+        }
+
+        party.addView(playlistBox, LinearLayout.LayoutParams(-1, dp(48+56)).apply { topMargin = dp(8) })
+
+        // Chat below player - bubbles
+        val chatHeader = TextView(this).apply { text = "💬 Chat (MPV Party)"; setTextColor(Color.WHITE); textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(dp(12), dp(12), dp(12), dp(6)) }
+        party.addView(chatHeader, LinearLayout.LayoutParams(-1,-2))
+
+        val chatScroll = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#0d0716"))
+        }
+        val chat = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(12)) }
+        chatList = chat
+        chatScroll.addView(chat, LinearLayout.LayoutParams(-1,-2))
+        party.addView(chatScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val chatInputRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(Color.parseColor("#1a1228")) }
+        val chatInput = EditText(this).apply {
+            hint = "Message..."
+            setHintTextColor(Color.parseColor("#666666"))
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(Color.parseColor("#0a0a0a")) }
+        }
+        val sendBtn = TextView(this).apply {
+            text = "➤"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(Color.parseColor("#c026d3")) }
+        }
+        chatInputRow.addView(chatInput, LinearLayout.LayoutParams(0,-2,1f).apply { rightMargin = dp(8) })
+        chatInputRow.addView(sendBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+
+        sendBtn.setOnClickListener {
+            val msg = chatInput.text.toString().trim()
+            if (msg.isBlank()) return@setOnClickListener
+            addChatBubble("You", msg, true)
+            chatInput.setText("")
+        }
+
+        party.addView(chatInputRow, LinearLayout.LayoutParams(-1,-2))
+
+        // Scroll container for party UI
+        val partyScroll = ScrollView(this)
+        partyScroll.addView(party, LinearLayout.LayoutParams(-1,-2))
+        r.addView(partyScroll, FrameLayout.LayoutParams(-1,-1).apply { topMargin = 0 })
+
+        // Audio & Subtitles Panel 55% #0a0a0a
+        val ap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#0a0a0a")); setPadding(dp(16), dp(14), dp(16), dp(14)); visibility = View.GONE; elevation = dp(10).toFloat() }
+        val apTitle = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val apIcon = TextView(this).apply { text = "〰️"; setTextColor(Color.parseColor("#c026d3")); textSize = 18f }
+        val apTxt = TextView(this).apply { text = "Audio & Subtitles"; setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(dp(8),0,0,0) }
+        val apClose = TextView(this).apply { text = "✕"; setTextColor(Color.WHITE); textSize = 16f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(10), dp(6), dp(10), dp(6)); gravity = Gravity.CENTER; setOnClickListener { ap.visibility = View.GONE } }
+        apTitle.addView(apIcon); apTitle.addView(apTxt, LinearLayout.LayoutParams(0, -2, 1f)); apTitle.addView(apClose, LinearLayout.LayoutParams(dp(36), dp(36)))
+        ap.addView(apTitle)
+        ap.addView(TextView(this).apply { text = "〰️ AUDIO TRACK (DUAL AUDIO)"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) })
+        ap.addView(TextView(this).apply { text = "Koi audio track list nahi mili"; setTextColor(Color.parseColor("#aaaaaa")); textSize = 13f })
+        ap.addView(TextView(this).apply { text = "📄 SUBTITLES"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) })
+        ap.addView(TextView(this).apply { text = "Off"; setTextColor(Color.WHITE); textSize = 14f; setPadding(dp(16), dp(12), dp(16), dp(12)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(Color.parseColor("#2a0a2a")); setStroke(dp(1), Color.parseColor("#c026d3")) } }, LinearLayout.LayoutParams(-1, dp(48)))
+        fun addSlider(label: String, value: String): LinearLayout {
+            val lay = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(14), 0, 0) }
+            val lbl = TextView(this@MainActivity).apply { text = "$label · $value"; setTextColor(Color.parseColor("#cccccc")); textSize = 13f }
+            val track = FrameLayout(this@MainActivity).apply {
+                val bg = View(this@MainActivity).apply { setBackgroundColor(Color.parseColor("#333333")) }
+                addView(bg, FrameLayout.LayoutParams(-1, dp(6)).apply { gravity = Gravity.CENTER_VERTICAL })
+                val fill = View(this@MainActivity).apply { setBackgroundColor(Color.parseColor("#c026d3")) }
+                addView(fill, FrameLayout.LayoutParams(dp(120), dp(6)).apply { gravity = Gravity.CENTER_VERTICAL })
+                val dot = View(this@MainActivity).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(Color.parseColor("#c026d3")); setSize(dp(18), dp(18)) } }
+                addView(dot, FrameLayout.LayoutParams(dp(18), dp(18)).apply { gravity = Gravity.CENTER_VERTICAL; leftMargin = dp(120) })
             }
+            lay.addView(lbl); lay.addView(track, LinearLayout.LayoutParams(-1, dp(24)).apply { topMargin = dp(8) })
+            return lay
         }
-        try {
-            if (Looper.myLooper() == Looper.getMainLooper()) restore.run() else runOnUiThread(restore)
-        } catch (_: Throwable) {
-            callAudioActive = false
-            callOriginalDevice = null
-        }
-    }
+        ap.addView(addSlider("Sub size", "1.0x"))
+        ap.addView(addSlider("Sub delay", "0.0s"))
+        ap.addView(addSlider("Audio delay", "0.0s"))
+        audioPanel = ap
+        r.addView(ap, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.55).toInt(), -1).apply { gravity = Gravity.END })
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 2) {
-            val r = pendingWebPerm
-            pendingWebPerm = null
-            if (r == null) return
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                r.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-            } else {
-                r.deny()
-                showBanner("🎤 Mic ki ijazat nahi mili — voice message ke liye Allow karein")
+        // Player Settings Panel
+        val sp = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#0a0a0a")); setPadding(dp(16), dp(14), dp(16), dp(14)); visibility = View.GONE; elevation = dp(10).toFloat() }
+        val spTitle = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val spIcon = TextView(this).apply { text = "⚙️"; setTextColor(Color.parseColor("#c026d3")); textSize = 18f }
+        val spTxt = TextView(this).apply { text = "Player Settings"; setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(dp(8),0,0,0) }
+        val spClose = TextView(this).apply { text = "✕"; setTextColor(Color.WHITE); textSize = 16f; setBackgroundColor(Color.parseColor("#2a2a2a")); setPadding(dp(10), dp(6), dp(10), dp(6)); gravity = Gravity.CENTER; setOnClickListener { sp.visibility = View.GONE } }
+        spTitle.addView(spIcon); spTitle.addView(spTxt, LinearLayout.LayoutParams(0, -2, 1f)); spTitle.addView(spClose, LinearLayout.LayoutParams(dp(36), dp(36)))
+        sp.addView(spTitle)
+        sp.addView(addSlider("🔊 VOLUME", "100%"))
+        sp.addView(View(this).apply { setBackgroundColor(Color.parseColor("#222222")) }, LinearLayout.LayoutParams(-1, dp(4)).apply { topMargin = dp(10) })
+        sp.addView(addSlider("☀️ BRIGHTNESS", "100%"))
+        val speedLabel = TextView(this).apply { text = "⏱ SPEED"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) }
+        sp.addView(speedLabel)
+        val speedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun speedBtn(txt: String, active: Boolean): TextView {
+            return TextView(this@MainActivity).apply { text = txt; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(14), dp(8), dp(14), dp(8)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (active) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }; setOnClickListener { setSpeed(txt) } }
+        }
+        speedRow.addView(speedBtn("0.5x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        speedRow.addView(speedBtn("0.75x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        speedRow.addView(speedBtn("1x", true), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        speedRow.addView(speedBtn("1.25x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        speedRow.addView(speedBtn("1.5x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        speedRow.addView(speedBtn("2x", false), LinearLayout.LayoutParams(-2, -2))
+        sp.addView(speedRow)
+        val aspectLabel = TextView(this).apply { text = "⧉ ASPECT"; setTextColor(Color.parseColor("#888888")); textSize = 11f; setPadding(0, dp(18), 0, dp(8)) }
+        sp.addView(aspectLabel)
+        val aspectRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun aspectBtn(txt: String, active: Boolean): TextView {
+            return TextView(this@MainActivity).apply { text = txt; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(16), dp(8), dp(16), dp(8)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (active) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }; setOnClickListener { setAspect(txt); sp.visibility = View.GONE } }
+        }
+        aspectRow.addView(aspectBtn("contain", true), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        aspectRow.addView(aspectBtn("cover", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        aspectRow.addView(aspectBtn("16/9", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        aspectRow.addView(aspectBtn("4/3", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+        aspectRow.addView(aspectBtn("Pan/Scan", false), LinearLayout.LayoutParams(-2, -2))
+        sp.addView(aspectRow)
+        settingsPanel = sp
+        r.addView(sp, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.55).toInt(), -1).apply { gravity = Gravity.END })
+
+        setContentView(r)
+
+        // Join button logic
+        joinBtn.setOnClickListener {
+            val name = nameInput.text.toString().trim()
+            val room = roomInput.text.toString().trim()
+            if (name.isBlank() || room.isBlank()) {
+                Toast.makeText(this, "Name & Room required", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+            currentTitle = "$room • $name"
+            titleView?.text = "🎬 $currentTitle"
+            joinWrap.visibility = View.GONE
+            partyScroll.visibility = View.VISIBLE
+            // party is inside partyScroll, need to show parent scroll
+            (partyScroll.parent as? View)?.visibility = View.VISIBLE
+            // Actually partyUi is inside partyScroll, we already set partyScroll visible via r? Let's just show partyUi container's parent
+            partyUi?.visibility = View.VISIBLE
+            // Find partyScroll and show
+            partyScroll.visibility = View.VISIBLE
+            // Add welcome chat
+            addChatBubble("System", "Welcome $name to $room - MPV 0.3.0 pure native, no Premium", false)
+            addChatBubble("System", "Add YouTube (360p lock) or MP4/MKV/M3U8 (HQ original)", false)
         }
-    }
 
-    private fun showBanner(message: String) {
-        if (!::banner.isInitialized) return
-        banner.removeCallbacks(hideBanner)
-        banner.text = message
-        banner.visibility = View.VISIBLE
-        banner.postDelayed(hideBanner, 2600)
-    }
+        // Initially hide party scroll, show join
+        partyScroll.visibility = View.GONE
 
-    private val hideBanner = Runnable { banner.visibility = View.GONE }
-
-    private fun pulse(v: View) {
-        v.animate().setDuration(900).alpha(1f).withEndAction {
-            v.animate().setDuration(900).alpha(0.4f).withEndAction { pulse(v) }
-        }.start()
-    }
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == 777) {
-            val res = if (resultCode == RESULT_OK && data?.data != null) arrayOf(data.data!!) else null
-            fileCallback?.onReceiveValue(res)
-            fileCallback = null
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { it.hide(android.view.WindowInsets.Type.systemBars()); it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE }
         } else {
-            super.onActivityResult(requestCode, resultCode, data)
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         }
     }
 
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        // Boss fix: call ke dauran PiP me na jao - warna app bahar phenkta hai
-        if (CallForegroundService.running) return
-        // Home button: shrink into PiP so the WebView stays visible and the party keeps playing.
-        if (Build.VERSION.SDK_INT >= 26 && customView == null) {
-            runCatching {
-                enterPictureInPictureMode(
-                    PictureInPictureParams.Builder()
-                        .setAspectRatio(android.util.Rational(1, 1))
-                        .build()
-                )
-            }
-        }
-    }
-
-    override fun onPictureInPictureModeChanged(isInPip: Boolean, newConfig: android.content.res.Configuration) {
-        super.onPictureInPictureModeChanged(isInPip, newConfig)
-        if (::pipCover.isInitialized) {
-            pipCover.visibility = if (isInPip) View.VISIBLE else View.GONE
-            if (isInPip) banner.visibility = View.GONE
-        }
-    }
-
-    private val stopBgIfForeground = Runnable {
-        /* Start request ka onCreate/startForeground pehle complete hone do. */
-        if (resumed && !BgNotifyService.noteMuted && BgNotifyService.running) {
-            try { BgNotifyService.stop(this) } catch (t: Throwable) {}
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        try {
-            bgHandler.removeCallbacks(bgStarter)
-            bgHandler.removeCallbacks(stopBgIfForeground)
-            /* onStart par foran stop karna FGS ke pending start ko race me cancel kar sakta tha.
-               Thori dair baad sirf confirmed-running service band karo. */
-            if (!BgNotifyService.noteMuted) bgHandler.postDelayed(stopBgIfForeground, 2000L)
-        } catch (t: Throwable) {}
-    }
-
-    override fun onResume() {
-        super.onResume()
-        resumed = true
-        web.onResume()
-        // Boss fix: volume zero but song 100% - media playing via call stream - ensure normal mode when not in call
-        if (!CallForegroundService.running) {
-            try { resetCallAudioRoute() } catch (_: Throwable) {}
-            // Extra force normal mode immediately
-            try {
-                val audio = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                audio.mode = android.media.AudioManager.MODE_NORMAL
-                audio.isSpeakerphoneOn = false
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    try { audio.clearCommunicationDevice() } catch (_: Throwable) {}
-                }
-            } catch (_: Throwable) {}
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        resumed = false
-    }
-
-    override fun onStop() {
-        super.onStop()
-        if (!CallForegroundService.running) resetCallAudioRoute()
-        try { bgHandler.removeCallbacks(stopBgIfForeground) } catch (t: Throwable) {}
-        web.onResume()
-        web.resumeTimers()
-        /* Boss fix: call ke dauran BgNotifyService start na karo - clash se app bahar phenkta hai */
-        if (CallForegroundService.running) return
-        /* User app se bahar jaye to background DM listener foran start ho,
-           taa ke 30-second blind window na rahe. */
-        if (!isChangingConfigurations) {
-            try {
-                bgHandler.removeCallbacks(bgStarter)
-                bgHandler.post(bgStarter)
-            } catch (t: Throwable) {}
-        }
-    }
-
-    // NOTE: onPause() intentionally does NOT call web.onPause() — background audio must keep flowing.
-
-    /* ---------------- v30: native player ko page se khud pakro ---------------- */
-
-    private val JS_WATCH = "(function(){try{var v=document.getElementById('mp4-player');if(!v)return '';" +
-            "var u=v.currentSrc||v.src||'';if((v.className||'').indexOf('hidden')>=0)return '';" +
-            "if(u.indexOf('http')!==0&&u.indexOf('blob:')!==0)return '';return u;}catch(e){return '';}})()"
-
-    private val JS_GET = "(function(){try{var v=document.getElementById('mp4-player');var u=v?(v.currentSrc||v.src||''):'';" +
-            "var t=document.getElementById('mini-title');return (u||'')+'\\u0001'+(t?(t.textContent||''):'');}catch(e){return '';}})()"
-
-    private fun jstr(res: String?): String {
-        if (res == null || res == "null") return ""
-        return try { org.json.JSONObject("{\"v\":$res}").getString("v") } catch (t: Throwable) { "" }
-    }
-
-    private fun pausePagePlayer() {
-        try {
-            web.evaluateJavascript(
-                "(function(){try{if(typeof suppressMP4!=='undefined')suppressMP4=true;}catch(e){}" +
-                "try{var v=document.getElementById('mp4-player');if(v)v.pause();}catch(e){}})()", null
-            )
-        } catch (t: Throwable) {}
-    }
-
-    private fun openNative(url: String, title: String?, alt: String? = null) {
-        if (url.isBlank()) return
-        pausePagePlayer()
-        runOnUiThread {
-            try {
-                startActivity(Intent(this, PlayerActivity::class.java).apply {
-                    putExtra("url", url)
-                    putExtra("title", title ?: "Video")
-                    if (!alt.isNullOrBlank()) putExtra("alt", alt)
-                })
-            } catch (t: Throwable) { showBanner("\u26a0\ufe0f Native player nahi khula") }
-        }
-    }
-
-    private fun tapNative() {
-        try {
-            web.evaluateJavascript(JS_GET) { res ->
-                val parts = jstr(res).split('\u0001')
-                val url = parts.getOrNull(0)?.trim() ?: ""
-                val title = parts.getOrNull(1)?.trim() ?: "Video"
-                if (url.startsWith("http") || url.startsWith("blob:")) openNative(url, title)
-                else showBanner("\u26a0\ufe0f Pehle koi direct video link lagao (mp4 / m3u8)")
-            }
-        } catch (t: Throwable) {}
-    }
-
-    private val watchMp4 = object : Runnable {
-        override fun run() {
-            try {
-                if (resumed) {
-                    web.evaluateJavascript(JS_WATCH) { res ->
-                        try {
-                            val u = jstr(res).trim()
-                            if (u.length > 8 && u != lastAutoUrl) {
-                                lastAutoUrl = u
-                                openNative(u, null)
-                            }
-                        } catch (t: Throwable) {}
+    private fun showJoin() {
+        // Go back to join screen
+        root?.let { r ->
+            // Find joinWrap and partyScroll by traversing
+            for (i in 0 until r.childCount) {
+                val c = r.getChildAt(i)
+                if (c is FrameLayout) { // joinWrap
+                    if (c.childCount > 0 && c.getChildAt(0) is LinearLayout) {
+                        val inner = c.getChildAt(0) as LinearLayout
+                        if (inner.childCount > 0 && inner.getChildAt(0) is FrameLayout) { // avatar check
+                            c.visibility = View.VISIBLE
+                        }
                     }
                 }
-            } catch (t: Throwable) {}
-            bgHandler.postDelayed(this, 1500)
+                if (c is ScrollView) {
+                    c.visibility = View.GONE
+                }
+            }
         }
     }
 
-    /* ---------------- v26: DM notifications ---------------- */
-
-    private fun postNote(title: String?, text: String?, code: String?) {
-        if (resumed) return            // app saamne hai -> toast/page khud dikha dega
-        NotifHub.post(this, title, text, "fg", code)
-    }
-
-    override fun onDestroy() {
-        try { NotifHub.setReplyTarget("fg", null) } catch (t: Throwable) {}
-        super.onDestroy()
-    }
-
-    @Deprecated("Handled below")
-    override fun onBackPressed() {
-        if (customView != null) {
-            customViewCallback?.onCustomViewHidden()
-            return
+    private fun addToPlaylist(title: String, url: String) {
+        playlist.add(title to url)
+        val item = TextView(this).apply {
+            text = "▶ $title\n$url"
+            setTextColor(Color.parseColor("#cccccc"))
+            textSize = 12f
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.parseColor("#0a0a0a"))
+                setStroke(dp(1), Color.parseColor("#2a2a2a"))
+            }
+            setOnClickListener { playUrl(url, title) }
         }
-        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+        playlistList?.addView(item, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(6) })
+        if (playlist.size == 1) playUrl(url, title)
+        // Expand playlist if first item
+        if (playlist.size == 1 && !isPlaylistExpanded) {
+            isPlaylistExpanded = true
+            playlistContainer?.layoutParams?.height = dp(380)
+            playlistList?.visibility = View.VISIBLE
+        }
     }
+
+    private fun playUrl(url: String, title: String) {
+        scope.launch {
+            var finalUrl = url
+            if (url.contains("youtube") || url.contains("youtu.be")) {
+                finalUrl = extractYoutube360p(url) ?: url
+            }
+            withContext(Dispatchers.Main) {
+                currentTitle = title
+                titleView?.text = "🎬 $title"
+                mpvView?.playFile(finalUrl)
+                isPlaying = true
+                playBtn?.text = "⏸"
+                centerPlay?.visibility = View.GONE
+                addChatBubble("Player", "Now playing: $title ${if (url.contains("youtu")) "[360p lock]" else "[HQ original]"}", false)
+            }
+        }
+    }
+
+    private suspend fun extractYoutube360p(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val service = ServiceList.YouTube
+            val linkHandler = service.streamLHFactory.fromUrl(url)
+            val extractor = service.getStreamExtractor(linkHandler)
+            extractor.fetchPage()
+            val videoStreams = extractor.videoStreams
+            val best360 = videoStreams?.filter { !it.url.isNullOrEmpty() && !it.isVideoOnly }?.sortedBy { kotlin.math.abs((it.height ?: 360) - 360) }?.firstOrNull { it.height in 300..400 } ?: videoStreams?.firstOrNull { !it.url.isNullOrEmpty() && it.height <= 360 }
+            return@withContext best360?.url
+        } catch (e: Exception) { null }
+    }
+
+    private fun addChatBubble(sender: String, msg: String, isMe: Boolean) {
+        val bubble = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(if (isMe) Color.parseColor("#c026d3") else Color.parseColor("#1a1a1a"))
+            }
+        }
+        val s = TextView(this).apply { text = sender; setTextColor(if (isMe) Color.WHITE else Color.parseColor("#c026d3")); textSize = 11f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        val m = TextView(this).apply { text = msg; setTextColor(Color.WHITE); textSize = 13f }
+        bubble.addView(s); bubble.addView(m)
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = if (isMe) Gravity.END else Gravity.START
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        wrapper.addView(bubble, LinearLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.75).toInt(), -2))
+        chatList?.addView(wrapper)
+    }
+
+    private fun togglePlay() {
+        val mpv = mpvView?.mpv
+        if (isPlaying) {
+            mpv?.setString("pause", "yes")
+            isPlaying = false; playBtn?.text = "▶"; centerPlay?.visibility = View.VISIBLE
+        } else {
+            mpv?.setString("pause", "no")
+            isPlaying = true; playBtn?.text = "⏸"; centerPlay?.visibility = View.GONE
+        }
+    }
+
+    private fun setAspect(mode: String) {
+        try {
+            val mpv = mpvView?.mpv
+            when (mode) {
+                "contain" -> { mpv?.setString("video-aspect-override", "no"); mpv?.setString("panscan", "0.0") }
+                "cover" -> { mpv?.setString("panscan", "1.0") }
+                "16/9" -> mpv?.setString("video-aspect-override", "16:9")
+                "4/3" -> mpv?.setString("video-aspect-override", "4:3")
+                "Pan/Scan" -> mpv?.setString("panscan", "1.0")
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun setSpeed(txt: String) {
+        try {
+            val s = txt.replace("x","").toDoubleOrNull() ?: 1.0
+            mpvView?.mpv?.setString("speed", s.toString())
+        } catch (e: Exception) {}
+    }
+
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            try {
+                enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16,9)).build())
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).roundToInt()
+    override fun onDestroy() { try { mpvView?.destroy() } catch (e: Exception) {}; scope.cancel(); super.onDestroy() }
 }
