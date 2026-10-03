@@ -1,49 +1,28 @@
-name: Build APK
-
+name: Build MPV Hybrid Final
 on:
   push:
     branches: [ main ]
-
-permissions:
-  contents: write
-
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Build debug APK
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.4
+      - name: Accept licenses
+        run: yes | sdkmanager --licenses || true
+      - name: Build Debug APK - MPV 0.23.0 + YouTube 360p lock + MKV/MP4 HQ
         run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleDebug
-
-      - name: Rename APK
-        run: |
-          find app/build/outputs/apk -name "*.apk" -type f
-          APK=$(find app/build/outputs/apk -name "*.apk" -type f | head -1)
-          test -n "$APK" || { echo "No APK produced!"; exit 1; }
-          cp "$APK" "MusicParty-v${{ github.run_number }}.apk"
-          ls -la *.apk
-
-      - name: Upload artifact
+          gradle :app:assembleDebug --stacktrace || gradle assembleDebug
+          ls -lh app/build/outputs/apk/debug/
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MusicParty-APK
-          path: MusicParty-v${{ github.run_number }}.apk
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk-${{ github.run_number }}
-          name: Music Party APK (build ${{ github.run_number }})
-          files: MusicParty-v${{ github.run_number }}.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+          name: Smart-Music-Party-MPV-Final-APK
+          path: app/build/outputs/apk/debug/*.apk
