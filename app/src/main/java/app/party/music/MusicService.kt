@@ -756,6 +756,9 @@ class MusicService : Service() {
         /** Native ka queue index (auto-next ke baad page ko batana parta hai). */
         fun nativeQueueIndex(): Int = instance?.queueIndex ?: -1
 
+        /** Current native stream ka URL (MPV video ko wapas dene ke liye). */
+        fun nativeUrl(): String? = instance?.engine?.currentUrl
+
         fun nativeAlive(): Boolean = instance?.engine?.currentUrl != null
         fun nativeError(): String? = instance?.lastError
         fun clearError() { instance?.lastError = null }

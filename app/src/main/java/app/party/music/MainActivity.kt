@@ -102,10 +102,25 @@ class MainActivity : Activity() {
     @Volatile private var prewarmAt: Long = 0L
     private var resumeTries = 0
 
+    /* ══ YOUTUBE = MPV (VIDEO + AUDIO) ══ */
+    private lateinit var mpvVideo: MpvVideoPlayer
+    private val ytResolver = java.util.concurrent.Executors.newSingleThreadExecutor()
+    @Volatile private var ytVideoId: String = ""        // kis YouTube item ka MPV chal raha hai
+    @Volatile private var ytVideoState: Int = 0         // 0=off 1=starting 2=active 3=fail
+    @Volatile private var ytVideoBanner: Boolean = false
+    @Volatile private var ytVideoTry: Int = 0           // isi item par kitni koshish ho chuki
+    @Volatile private var ytFailAt: Long = 0L           // aakhri fail kab hua
+    @Volatile private var ytFastPoll: Boolean = false   // YouTube chal raha -> page tez check karo
+    @Volatile private var ytLastPos: Double = 0.0
+    @Volatile private var ytLastPlaying: Boolean = false
+    @Volatile private var ytFsOn: Boolean = false       // apna fullscreen (Android ka kala nahi)
+    @Volatile private var ytHandbackDone: Boolean = false
+
     private val snapPoller = object : Runnable {
         override fun run() {
             pollSnapshot()
-            handoffHandler.postDelayed(this, 3000L)
+            // YouTube chal raha / MPV tayyar ho raha -> tez (warna iframe pehle bajta rehta hai)
+            handoffHandler.postDelayed(this, if (ytFastPoll || ytVideoState != 0) 600L else 3000L)
         }
     }
 
@@ -153,16 +168,17 @@ class MainActivity : Activity() {
         }
 
         root = FrameLayout(this)
-        root.setBackgroundColor(Color.parseColor("#0d0716"))
+        root.setBackgroundColor(Color.TRANSPARENT)   // MPV surface is ke PEECHE hota hai
 
         web = GifWebView(this)
-        web.setBackgroundColor(Color.parseColor("#0d0716"))
+        web.setBackgroundColor(Color.TRANSPARENT)    // page ke "hole" se MPV video dikhti hai
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
 
         // Branded, professional loading screen: icon + spinner + pulsing label.
         splash = LinearLayout(this)
         splash.orientation = LinearLayout.VERTICAL
         splash.gravity = Gravity.CENTER
+        splash.setBackgroundColor(Color.parseColor("#0d0716"))   // root transparent hai -> apna rang
         val logo = ImageView(this)
         logo.setImageDrawable(getDrawable(R.drawable.app_icon))
         val lp = LinearLayout.LayoutParams(dp(96), dp(96))
@@ -285,6 +301,14 @@ class MainActivity : Activity() {
         }
         web.webChromeClient = object : WebChromeClient() {
             override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                /* MPV video mode me Android ka fullscreen WebView KALA hota hai aur MPV ko dhak deta hai.
+                   Is liye usay cancel karo aur apna fullscreen (page poori screen) laga do. */
+                if (ytVideoState == 2) {
+                    try { callback.onCustomViewHidden() } catch (t: Throwable) {}
+                    try { web.evaluateJavascript("window.__wpMpvFsSet && window.__wpMpvFsSet(1)", null) } catch (t: Throwable) {}
+                    enterYtFs()
+                    return
+                }
                 customView?.let { (it.parent as? FrameLayout)?.removeView(it) }
                 customView = view
                 customViewCallback = callback
@@ -428,10 +452,44 @@ class MainActivity : Activity() {
             @android.webkit.JavascriptInterface
             fun clearIncomingCall() { CallForegroundService.stop(this@MainActivity) }
 
+            /* Page ke controls (play/pause/seek/mute) -> MPV */
+            @android.webkit.JavascriptInterface
+            fun mpvCmd(cmd: String?) {
+                runOnUiThread { handleMpvCommand(cmd) }
+            }
+
+            /* Page par naya YouTube item aaya -> foran kaam shuru (iframe pehle bajne se bachao) */
+            @android.webkit.JavascriptInterface
+            fun ytSeen(id: String?) {
+                runOnUiThread {
+                    try {
+                        val v = (id ?: "").trim()
+                        if (v.length != 11) return@runOnUiThread
+                        ytFastPoll = true
+                        if (v != ytVideoId) {
+                            // stream abhi se tayyar kar lo -> MPV foran shuru ho jayega
+                            ytResolver.execute {
+                                try { YtAudioSource.resolve(v, validate = false, preferHeight = 360) } catch (t: Throwable) {}
+                            }
+                            pollSnapshot()
+                        }
+                    } catch (t: Throwable) {}
+                }
+            }
+
             @android.webkit.JavascriptInterface
             fun appVersion(): Int = 41
         }, "YaarNative")
         registerForegroundReplyTarget()
+
+        /* ══ YOUTUBE = MPV (VIDEO + AUDIO): surface page ke peeche, page ke controls upar ══ */
+        try {
+            getWindow().setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            mpvVideo = MpvVideoPlayer(this, root)
+            mpvVideo.ensure()
+            YtAudioSource.ensureInit(applicationContext)
+            handoffHandler.postDelayed(mpvUiTick, 700L)
+        } catch (t: Throwable) { Log.e("MusicParty", "mpv video init fail", t) }
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
         web.onGif = { gifUrl ->
@@ -864,6 +922,295 @@ class MainActivity : Activity() {
         } catch (t: Throwable) {}
     }
 
+    /**
+     * ══ YOUTUBE = MPV (VIDEO + AUDIO) — v115 ══
+     *
+     * MPV ka surface page ke PEECHE hota hai; page ke player area me CSS "hole" bana diya jata hai,
+     * is liye us jagah MPV ki video nazar aati hai aur aawaz MPV se aati hai.
+     * Page ke apne controls (play/seek/quality) upar rehte hain — jaise hain waise kaam karte hain.
+     * Queue / chat / party sync page hi chalata hai -> sab kuch salamat rehta hai.
+     */
+    private fun syncYtVideo(s: WebBridge.Snapshot) {
+        try {
+            if (!s.isYoutube || s.id.isBlank() || s.id.length != 11) { endYtVideo(); return }
+            if (MusicService.nativeAlive()) return              // lock/unlock ka apna rasta hai
+            if (s.id != ytVideoId) { startYtVideo(s); return }
+            if (ytVideoState == 3) {
+                // pehli koshish fail hui thi -> khud ba khud dobara (user ko tap karne ki zarurat nahi)
+                val now = System.currentTimeMillis()
+                if (s.playing && ytVideoTry < 5 && now - ytFailAt > 5000L) startYtVideo(s)
+                return
+            }
+            if (ytVideoState == 2 && mpvVideo.hasFrame()) {
+                if (s.playing) {
+                    mpvVideo.resume()
+                    if (kotlin.math.abs(mpvVideo.position() - s.position) > 2.5) mpvVideo.seekTo(s.position)
+                } else {
+                    mpvVideo.pause()
+                }
+                setYtMute(true)          // page chup rehta hai (naye load par mute reset ho sakta hai)
+                updateYtRect()
+            }
+        } catch (t: Throwable) {}
+    }
+
+    /** Naya YouTube item: stream URL nikaalo aur MPV (video + audio) par chalao. */
+    private fun startYtVideo(s: WebBridge.Snapshot) {
+        if (s.id == ytVideoId) ytVideoTry += 1 else ytVideoTry = 1
+        ytLastPos = s.position
+        ytLastPlaying = s.playing
+        ytFastPoll = true
+        beginYtVideo(s.id, s.position, s.playing)
+    }
+
+    /** Fail ke baad khud dobara koshish (stored position/playing ke sath). */
+    private fun retryYtVideo() {
+        try {
+            val id = ytVideoId
+            if (id.isBlank()) return
+            if (MusicService.nativeAlive()) return
+            ytVideoTry += 1
+            beginYtVideo(id, ytLastPos, ytLastPlaying)
+        } catch (t: Throwable) {}
+    }
+
+    /** Asli kaam: stream nikaalo aur MPV par chalao. */
+    private fun beginYtVideo(wantId: String, wantPos: Double, wantPlay: Boolean) {
+        if (wantId.isBlank() || wantId.length != 11) return
+        ytVideoId = wantId
+        ytVideoState = 1
+        mpvVideo.ensure()
+        setYtMute(true)          // page ki aawaz foran band — MPV jab tayyar hoga aawaz dega
+        ytResolver.execute {
+            // 360p (user ki marzi) — muxed me 360p ke sab se qareeb; na mile to video + alag audio
+            val r = try { YtAudioSource.resolve(wantId, validate = false, preferHeight = 360) } catch (t: Throwable) { null }
+            handoffHandler.post {
+                try {
+                    if (ytVideoId != wantId) return@post
+                    if (r == null) { failYtVideo(wantId, "stream nahi mili"); return@post }
+                    mpvVideo.play(r.url, wantPos, startMuted = true)
+                    if (!r.audioUrl.isNullOrBlank()) mpvVideo.addAudio(r.audioUrl)   // video-only case: aawaz alag se
+                    if (!wantPlay) mpvVideo.pause()
+                    armYtWatch(wantId, 0)
+                } catch (t: Throwable) {}
+            }
+        }
+    }
+
+    /** MPV ka intezaar: pehla frame aa gaya -> page chup + MPV ki video/aawaz (warna fallback). */
+    private fun armYtWatch(id: String, attempt: Int) {
+        handoffHandler.postDelayed(object : Runnable {
+            override fun run() {
+                try {
+                    if (ytVideoId != id) return
+                    if (mpvVideo.hasFrame()) { activateYtVideo(id); return }
+                    val err = mpvVideo.error
+                    if (err != null || attempt >= 40) { failYtVideo(id, err); return }
+                    armYtWatch(id, attempt + 1)
+                } catch (t: Throwable) {}
+            }
+        }, 250L)
+    }
+
+    /** MPV chal gaya: page ki aawaz band + player area me hole + MPV ki aawaz on. */
+    private fun activateYtVideo(id: String) {
+        try {
+            setYtMute(true)
+            mpvVideo.show()
+            setYtHole(true)
+            setYtLink(true)          // page ke controls ab MPV ko command bhejenge
+            updateYtRect()
+            mpvVideo.setMuted(false)
+            ytVideoState = 2
+            if (!ytVideoBanner) { ytVideoBanner = true; showBanner("🎬 YouTube MPV par (video + audio)") }
+            Log.i("MusicParty", "yt video active: $id")
+        } catch (t: Throwable) {}
+    }
+
+    /** MPV na chala -> page hi apni aawaz chalata rahe (kabhi khamoshi nahi). */
+    private fun failYtVideo(id: String, err: String?) {
+        try {
+            if (ytVideoId != id) return
+            Log.w("MusicParty", "yt video fail: $err")
+            setYtMute(false)
+            quitYtFsQuiet()
+            mpvVideo.stop(); mpvVideo.hide(); setYtHole(false); setYtLink(false)
+            ytVideoState = 3
+            ytFailAt = System.currentTimeMillis()
+            if (ytVideoTry < 3) handoffHandler.postDelayed({ retryYtVideo() }, 1200L)   // foran dobara koshish
+            showBanner("⚠️ YouTube MPV par nahi chala" + (if (err.isNullOrBlank()) "" else ": $err") + " — page hi chala raha hai")
+        } catch (t: Throwable) {}
+    }
+
+    /** YouTube khatam / koi aur item -> MPV video band, page wapas normal. */
+    private fun endYtVideo() {
+        try {
+            if (ytVideoState == 0 && ytVideoId.isBlank()) return
+            quitYtFsQuiet()
+            ytVideoId = ""
+            ytVideoState = 0
+            ytVideoTry = 0
+            ytFailAt = 0L
+            mpvVideo.stop(); mpvVideo.hide(); setYtHole(false); setYtLink(false)
+            setYtMute(false)
+        } catch (t: Throwable) {}
+    }
+
+    /** Player area ka rect lo aur MPV surface wahan rakh do. */
+    private fun updateYtRect() {
+        try {
+            if (ytVideoState != 2) return
+            // holeJs(true) bars bhi update karta hai aur rect bhi wapas deta hai
+            web.evaluateJavascript(WebBridge.holeJs(true)) { res ->
+                try {
+                    val json = WebBridge.rawJson(res)
+                    if (!json.isNullOrBlank() && json != "{}") {
+                        val o = org.json.JSONObject(json)
+                        val w = o.optDouble("w", 0.0)
+                        val h = o.optDouble("h", 0.0)
+                        if (w >= 40 && h >= 40) {
+                            mpvVideo.setRect(
+                                o.optDouble("x", 0.0).toFloat(),
+                                o.optDouble("y", 0.0).toFloat(),
+                                w.toFloat(), h.toFloat()
+                            )
+                        }
+                    }
+                } catch (t: Throwable) {}
+            }
+        } catch (t: Throwable) {}
+    }
+
+    private fun setYtMute(m: Boolean) {
+        try { web.evaluateJavascript(WebBridge.muteJs(m), null) } catch (t: Throwable) {}
+    }
+
+    private fun setYtHole(on: Boolean) {
+        try { web.evaluateJavascript(WebBridge.holeJs(on), null) } catch (t: Throwable) {}
+    }
+
+    private fun setYtLink(on: Boolean) {
+        try { web.evaluateJavascript(if (on) WebBridge.JS_MPV_ON else WebBridge.JS_MPV_OFF, null) } catch (t: Throwable) {}
+    }
+
+    /** Apna MPV fullscreen: page layout full-screen ho jata hai; hum rect + screen-on theek karte hain. */
+    private fun enterYtFs() {
+        try {
+            ytFsOn = true
+            try { window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } catch (t: Throwable) {}
+            for (d in longArrayOf(120L, 400L, 900L)) {
+                handoffHandler.postDelayed({ try { updateYtRect() } catch (t: Throwable) {} }, d)
+            }
+            Log.i("MusicParty", "yt fullscreen ON")
+        } catch (t: Throwable) {}
+    }
+
+    private fun exitYtFs() {
+        try {
+            ytFsOn = false
+            try { window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } catch (t: Throwable) {}
+            for (d in longArrayOf(120L, 400L)) {
+                handoffHandler.postDelayed({ try { updateYtRect() } catch (t: Throwable) {} }, d)
+            }
+            Log.i("MusicParty", "yt fullscreen OFF")
+        } catch (t: Throwable) {}
+    }
+
+    /** Fullscreen ko chup-chaap band karo (video khatam / fail par). */
+    private fun quitYtFsQuiet() {
+        try {
+            if (!ytFsOn) return
+            try { web.evaluateJavascript("window.__wpMpvFsSet && window.__wpMpvFsSet(0)", null) } catch (t: Throwable) {}
+            exitYtFs()
+        } catch (t: Throwable) {}
+    }
+
+    /** Page se aayi command (play/pause/seek/mute) -> MPV. Sirf jab MPV video active ho. */
+    private fun handleMpvCommand(cmd: String?) {
+        try {
+            val c = (cmd ?: "").trim()
+            if (c.isEmpty()) return
+            if (c == "rect") { updateYtRect(); return }      // fullscreen/resize: foran surface set karo
+            if (c == "fs:1") { enterYtFs(); return }
+            if (c == "fs:0") { exitYtFs(); return }
+            if (ytVideoState != 2) return
+            when {
+                c == "toggle" || c == "playpause" -> if (mpvVideo.isPaused()) mpvVideo.resume() else mpvVideo.pause()
+                c == "pause" -> mpvVideo.pause()
+                c == "play" -> mpvVideo.resume()
+                c == "mute" -> mpvVideo.setMuted(!mpvVideo.isMuted())
+                c.startsWith("seekrel:") -> {
+                    val d = c.substringAfter(':').toDoubleOrNull() ?: return
+                    mpvVideo.seekTo((mpvVideo.position() + d).coerceAtLeast(0.0))
+                }
+                c.startsWith("seekabs:") -> {
+                    val t = c.substringAfter(':').toDoubleOrNull() ?: return
+                    mpvVideo.seekTo(t.coerceAtLeast(0.0))
+                }
+            }
+            setYtMute(true)   // page ki iframe chup hi rahe (double audio kabhi nahi)
+            Log.i("MusicParty", "mpv cmd: $c")
+        } catch (t: Throwable) {}
+    }
+
+    /** Lock ke baad: aawaz service se wapas MPV (video + audio) par — bina gap ke. */
+    private fun handBackToMpvVideo() {
+        try {
+            val url = MusicService.nativeUrl()
+            val pos = MusicService.nativePosition()
+            val id = MusicService.nativeItemKey()
+            if (url.isNullOrBlank() || id.isBlank()) { MusicService.stopNative(); return }
+            ytVideoId = id
+            ytVideoState = 1
+            mpvVideo.play(url, pos, startMuted = true)
+            handoffHandler.postDelayed({
+                try {
+                    if (mpvVideo.hasFrame()) {
+                        setYtMute(true)
+                        mpvVideo.show(); setYtHole(true); setYtLink(true); updateYtRect()
+                        mpvVideo.setMuted(false)
+                        ytVideoState = 2
+                    } else {
+                        setYtMute(false)     // fallback: page hi chalata rahe
+                        ytVideoState = 0
+                    }
+                } catch (t: Throwable) {}
+                try { MusicService.stopNative() } catch (t: Throwable) {}
+            }, 1600L)
+        } catch (t: Throwable) { try { MusicService.stopNative() } catch (t2: Throwable) {} }
+    }
+
+    /** Fullscreen view + uske bachon ka background transparent (taake peeche MPV surface dikhe). */
+    private fun makeTransparent(v: View) {
+        try { v.setBackgroundColor(Color.TRANSPARENT) } catch (t: Throwable) {}
+        try {
+            if (v is android.view.ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    val c = v.getChildAt(i)
+                    // WebView/surface jaise bhakti views ko chhero mat — sirf containers
+                    if (c is android.view.ViewGroup || c.javaClass.name.contains("FrameLayout")) makeTransparent(c)
+                }
+            }
+        } catch (t: Throwable) {}
+    }
+
+    /** MPV video chalte waqt page ko asli timing bhejo (time bar + mini player ka clock). */
+    private val mpvUiTick = object : Runnable {
+        override fun run() {
+            try {
+                if (ytVideoState == 2 && pageLoaded) {
+                    // MPV ki ASLI timing page par (time line, icons, mini clock) + surface rect taaza (rotate/fullscreen)
+                    web.evaluateJavascript(
+                        WebBridge.mpvTimeJs(mpvVideo.position(), !mpvVideo.isPaused(), mpvVideo.duration(), mpvVideo.isMuted()),
+                        null
+                    )
+                    updateYtRect()
+                }
+            } catch (t: Throwable) {}
+            handoffHandler.postDelayed(this, 450L)
+        }
+    }
+
     /** App saamne hone par page ki state + queue cache karo (JS zinda hai, is liye bharosemand). */
     private fun pollSnapshot() {
         try {
@@ -873,7 +1220,13 @@ class MainActivity : Activity() {
                 if (s != null && !s.isEmpty) {
                     lastSnap = s
                     lastSnapAt = System.currentTimeMillis()
+                    if (s.isYoutube) {
+                        ytFastPoll = s.playing
+                        ytLastPos = s.position
+                        ytLastPlaying = s.playing
+                    }
                     maybePrewarm(s)     // build 9: FAST START — jab app saamne hai, sab tayyar kar lo
+                    syncYtVideo(s)      // YouTube video + audio MPV par
                 }
             }
             // build 7/9: queue bhi cache karo — background auto-next isi se chalta hai
@@ -893,6 +1246,7 @@ class MainActivity : Activity() {
      */
     private fun handoffNow(reason: String) {
         if (!pageLoaded) return
+        ytHandbackDone = false
         val snap = lastSnap
         if (snap == null || snap.isEmpty) return
         val ageMs = System.currentTimeMillis() - lastSnapAt
@@ -912,12 +1266,25 @@ class MainActivity : Activity() {
             return
         }
         val type = if (snap.isYoutube) "youtube" else "direct"
+        // MPV video engine chal raha hai? -> uska position hi asli hai
+        var hoPos = snap.position
+        if (ytVideoState == 2) {
+            try { val p = mpvVideo.position(); if (p > 0.5) hoPos = p } catch (t: Throwable) {}
+        }
         handoffAttempted = true
-        Log.i("MusicParty", "handoff[$reason] type=$type id=${snap.id} pos=${snap.position} title=${snap.title}")
+        Log.i("MusicParty", "handoff[$reason] type=$type id=${snap.id} pos=$hoPos title=${snap.title}")
         MusicService.start(this)
         pollSnapshot()   // queue + taza state turant cache (JS abhi zinda hai)
-        MusicService.handoff(this, type, snap.id, snap.position, snap.title, true, snap.queueIndex, lastQueueJson)
+        MusicService.handoff(this, type, snap.id, hoPos, snap.title, true, snap.queueIndex, lastQueueJson)
         try { web.evaluateJavascript(WebBridge.JS_PAUSE_PAGE, null) } catch (t: Throwable) {}
+        // video engine ka kaam khatam — service (audio-only) sambhal leti hai
+        if (ytVideoState == 2) {
+            handoffHandler.postDelayed({
+                try {
+                    if (ytVideoState == 2) { mpvVideo.stop(); mpvVideo.hide(); setYtHole(false) }
+                } catch (t: Throwable) {}
+            }, 1500L)
+        }
     }
 
     /**
@@ -980,8 +1347,13 @@ class MainActivity : Activity() {
                 web.evaluateJavascript(WebBridge.JS_IS_PAGE_PLAYING) { res ->
                     val playing = res?.contains("1") == true
                     if (playing || !play) {
-                        // page ne control le liya -> native band
-                        MusicService.stopNative()
+                        // YouTube hai -> aawaz wapas MPV (video + audio) par le jao
+                        if (MusicService.nativeIsYoutube() && !ytHandbackDone) {
+                            ytHandbackDone = true
+                            handBackToMpvVideo()
+                        } else {
+                            MusicService.stopNative()   // direct file -> page hi chala raha hai
+                        }
                         resumeTries = 0
                     } else if (resumeTries >= 10) {
                         // ~8 second tak koshish (YouTube iframe ko reload hone me waqt lagta hai)
@@ -1043,6 +1415,7 @@ class MainActivity : Activity() {
            Screen lock / Home par isFinishing false hota hai, is liye wahan audio chalta rehta hai. */
         try {
             if (isFinishing) {
+                try { mpvVideo.destroy() } catch (t: Throwable) {}
                 MusicService.stopNativeHard()
                 MusicService.clearCaches()   // build 11: kaam khatam -> URLs/queue bhi RAM se saaf
                 MusicService.stop(this)
@@ -1055,6 +1428,11 @@ class MainActivity : Activity() {
 
     @Deprecated("Handled below")
     override fun onBackPressed() {
+        if (ytFsOn) {
+            try { web.evaluateJavascript("window.__wpMpvFsSet && window.__wpMpvFsSet(0)", null) } catch (t: Throwable) {}
+            exitYtFs()
+            return
+        }
         if (customView != null) {
             customViewCallback?.onCustomViewHidden()
             return

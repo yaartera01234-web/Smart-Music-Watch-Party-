@@ -38,7 +38,7 @@ object YtAudioSource {
 
     @Volatile private var inited = false
 
-    data class Result(val url: String, val title: String?)
+    data class Result(val url: String, val title: String?, val audioUrl: String? = null)
 
     fun ensureInit(context: Context) {
         if (inited) return
@@ -78,20 +78,47 @@ object YtAudioSource {
      * validate=false (default): sirf extraction — tez (lock screen handoff ke liye).
      * validate=true: har candidate ko chhote Range request se test karta hai (dhema, magar yaqeeni).
      */
-    fun resolve(videoId: String, validate: Boolean = false): Result? = try {
+    fun resolve(videoId: String, validate: Boolean = false, preferHeight: Int = 0): Result? = try {
+        val ck = "$videoId:$preferHeight"
+        if (preferHeight > 0) cachedVideo(ck)?.let { return it }   // page load hotay hi tayyar hui thi
         val service = ServiceList.YouTube
         val handler = service.streamLHFactory.fromUrl("https://www.youtube.com/watch?v=$videoId")
         val extractor = service.getStreamExtractor(handler)
         extractor.fetchPage()
 
         val candidates = ArrayList<Pair<String, String>>()   // url to label
+        var extraAudio: String? = null                       // video-only case: alag audio (MPV: audio-add)
 
-        // 1) audio-only — DATA BACHANE ke liye sab se KAM bitrate wali pehle (build 16)
-        //    (YouTube filhal ye streams nahi deta, magar jab de to sab se halki chuni jaye)
         val audioList = extractor.audioStreams
             ?.filter { !it.url.isNullOrBlank() }
             ?.sortedBy { it.averageBitrate }
-        if (audioList != null && audioList.isNotEmpty()) {
+        val muxedList = extractor.videoStreams
+            ?.filter { !it.isVideoOnly && !it.url.isNullOrBlank() }
+
+        if (preferHeight > 0) {
+            // TEST APP (YouTube VIDEO): 360p ke sab se qareeb muxed (audio+video) stream pehle
+            muxedList
+                ?.sortedBy { Math.abs((it.height ?: 360) - preferHeight) }
+                ?.forEach { st ->
+                    val u = st.url
+                    if (!u.isNullOrBlank()) candidates.add(u to "muxed ${st.height}p ${st.format} (~${preferHeight}p)")
+                }
+            if (candidates.isEmpty()) {
+                // muxed bilkul nahi mila -> video-only (~360p) + alag audio stream
+                val v = extractor.videoStreams
+                    ?.filter { it.isVideoOnly && !it.url.isNullOrBlank() }
+                    ?.sortedBy { Math.abs((it.height ?: 360) - preferHeight) }
+                    ?.firstOrNull()
+                val vu = v?.url
+                if (!vu.isNullOrBlank()) {
+                    extraAudio = (audioList?.firstOrNull { it.averageBitrate >= 60 } ?: audioList?.firstOrNull())?.url
+                    candidates.add(vu to "video-only ${v?.height}p + alag audio")
+                }
+            }
+        }
+
+        // AWAZ wala rasta (lockscreen/service/sirf-audio): sab se halki audio-only pehle (data bachao)
+        if (preferHeight <= 0 && audioList != null && audioList.isNotEmpty()) {
             val pick = audioList.firstOrNull { it.averageBitrate >= 60 } ?: audioList[0]
             val pickUrl = pick.url
             if (!pickUrl.isNullOrBlank()) {
@@ -104,13 +131,12 @@ object YtAudioSource {
             }
         }
 
-        // 2) muxed (audio+video) — sab se KAM resolution pehle (data bachao), MPV sirf audio decode karega
-        extractor.videoStreams
-            ?.filter { !it.isVideoOnly }
+        // baaki muxed (fallback) — chhoti se bari
+        muxedList
             ?.sortedBy { it.height ?: 360 }
-            ?.forEach { s ->
-                val u = s.url
-                if (!u.isNullOrBlank()) candidates.add(u to "muxed ${s.height}p ${s.format}")
+            ?.forEach { st ->
+                val u = st.url
+                if (!u.isNullOrBlank() && candidates.none { it.first == u }) candidates.add(u to "muxed ${st.height}p ${st.format}")
             }
 
         if (candidates.isEmpty()) {
@@ -122,22 +148,44 @@ object YtAudioSource {
         val first = candidates.first()
         if (!validate) {
             Log.i(TAG, "chuna gaya (bina validate): ${first.second} (candidates=${candidates.size})")
-            return Result(first.first, title)
+            val outNv = Result(first.first, title, extraAudio)
+            if (preferHeight > 0) putCachedVideo(ck, outNv)
+            return outNv
         }
 
         for ((url, label) in candidates) {
             if (validateUrl(url)) {
                 Log.i(TAG, "chuna gaya: $label (candidates=${candidates.size})")
-                return Result(url, title)
+                val outV = Result(url, title, extraAudio)
+                if (preferHeight > 0) putCachedVideo(ck, outV)
+                return outV
             } else {
                 Log.w(TAG, "URL fail hua: $label")
             }
         }
         Log.w(TAG, "sab validation fail — pehla candidate phir bhi bhej rahe hain: ${first.second}")
-        Result(first.first, title)
+        val outT = Result(first.first, title, extraAudio)
+        if (preferHeight > 0) putCachedVideo(ck, outT)
+        outT
     } catch (t: Throwable) {
         Log.e(TAG, "resolve failed", t)
         null
+    }
+
+    /* TEST: page item load karte hi stream tayyar ho jaye -> MPV foran shuru (der nahi) */
+    private val videoCache = HashMap<String, Pair<Long, Result>>()
+
+    private fun cachedVideo(key: String): Result? = synchronized(videoCache) {
+        val e = videoCache[key] ?: return null
+        if (System.currentTimeMillis() - e.first > 120_000L) { videoCache.remove(key); return null }
+        e.second
+    }
+
+    private fun putCachedVideo(key: String, r: Result) {
+        synchronized(videoCache) {
+            videoCache[key] = System.currentTimeMillis() to r
+            if (videoCache.size > 8) videoCache.keys.firstOrNull()?.let { videoCache.remove(it) }
+        }
     }
 
     /** Chhota Range request: URL zinda hai? (200/206 = haan) */

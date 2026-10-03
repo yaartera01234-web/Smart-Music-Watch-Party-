@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music"      // ORIGINAL app ka package (V111/v48 users ke upar update)
         minSdk = 24
         targetSdk = 35
-        versionCode = 114                      // installed 113/48 se bara -> update install hoga
-        versionName = "114-MPV-BG"
+        versionCode = 115                      // installed 114/113/48 se bara -> seedha update install hoga
+        versionName = "115-MPV-YTVIDEO"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -65,6 +65,8 @@ dependencies {
     // ══════════ v111-FIX: LOCK SCREEN / BACKGROUND AUDIO ENGINE ══════════
     // MPV core (vid=no => audio only, surface ki zarurat nahi => lock screen par bhi chalta hai)
     implementation("io.github.yuroyami:libmpvkt:0.3.0")
+    // YouTube VIDEO ke liye — MpvView (surface wala view). Isi ke through video page ke peeche dikhti hai.
+    implementation("io.github.yuroyami:libmpvkt-view:0.3.0")
     // YouTube ke liye asli audio stream URL (MPV ko YouTube ka page nahi, seedha stream milta hai)
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
     implementation("org.jsoup:jsoup:1.17.2")
