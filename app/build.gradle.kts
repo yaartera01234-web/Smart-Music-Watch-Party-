@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "app.smart.mpv.party"
+    namespace = "app.party.music"
     compileSdk = 35
     defaultConfig {
         applicationId = "app.smart.mpv.party"
@@ -47,9 +47,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    // MPV 0.3.0 official - yuroyami maven (was 0.23.0 misnamed, actual libmpvKt 0.3.0)
     implementation("io.github.yuroyami:libmpvkt-view:0.3.0")
-    // YouTube 360p lock - NewPipeExtractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
     implementation("org.jsoup:jsoup:1.17.2")
 }
