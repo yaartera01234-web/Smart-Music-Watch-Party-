@@ -12,10 +12,11 @@ import android.widget.SeekBar
 import android.widget.TextView
 import kotlinx.coroutines.*
 import org.schabi.newpipe.extractor.ServiceList
-import is.xyz.mpv.MPVView
+import io.github.yuroyami.libmpvkt.view.MpvView
+import io.github.yuroyami.libmpvkt.MpvOptions
 
 class PlayerActivity : Activity() {
-    private var mpvView: MPVView? = null
+    private var mpvView: MpvView? = null
     private var root: FrameLayout? = null
     private var titleView: TextView? = null
     private var timeView: TextView? = null
@@ -26,7 +27,6 @@ class PlayerActivity : Activity() {
     private var curUrl = ""
     private var curTitle = "t3gj68ev41sa"
     private var isPlaying = false
-    private var aspectMode = "contain"
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,7 +35,12 @@ class PlayerActivity : Activity() {
         curTitle = intent.getStringExtra("title") ?: "t3gj68ev41sa"
         if (curUrl.isBlank()) { finish(); return }
         buildUi()
-        try { mpvView?.initialize(filesDir.path, cacheDir.path, "v") } catch (e: Exception) {}
+        // New API: MpvView initialize with MpvOptions
+        try {
+            mpvView?.initialize(MpvOptions())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         playUrl(curUrl)
     }
 
@@ -43,7 +48,7 @@ class PlayerActivity : Activity() {
         val r = FrameLayout(this)
         r.setBackgroundColor(Color.BLACK)
         root = r
-        val mpv = MPVView(this)
+        val mpv = MpvView(this)
         mpvView = mpv
         r.addView(mpv, FrameLayout.LayoutParams(-1, -1))
 
@@ -105,7 +110,7 @@ class PlayerActivity : Activity() {
         bottom.addView(ctrlRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12); gravity = Gravity.CENTER })
         r.addView(bottom, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.BOTTOM })
 
-        // Audio & Subtitles Panel
+        // Audio & Subtitles Panel - exact Watch-Party-Mpv clone 55% width #0a0a0a
         val ap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#0a0a0a")); setPadding(dp(16), dp(14), dp(16), dp(14)); visibility = View.GONE; elevation = dp(10).toFloat() }
         val apTitle = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val apIcon = TextView(this).apply { text = "〰️"; setTextColor(Color.parseColor("#c026d3")); textSize = 18f }
@@ -137,7 +142,7 @@ class PlayerActivity : Activity() {
         audioPanel = ap
         r.addView(ap, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.55).toInt(), -1).apply { gravity = Gravity.END })
 
-        // Player Settings Panel
+        // Player Settings Panel - VOLUME 100% + BRIGHTNESS 100% purple #c026d3 + SPEED + ASPECT
         val sp = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#0a0a0a")); setPadding(dp(16), dp(14), dp(16), dp(14)); visibility = View.GONE; elevation = dp(10).toFloat() }
         val spTitle = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val spIcon = TextView(this).apply { text = "⚙️"; setTextColor(Color.parseColor("#c026d3")); textSize = 18f }
@@ -152,7 +157,7 @@ class PlayerActivity : Activity() {
         sp.addView(speedLabel)
         val speedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun speedBtn(txt: String, active: Boolean): TextView {
-            return TextView(this@PlayerActivity).apply { text = txt; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(14), dp(8), dp(14), dp(8)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (active) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) } }
+            return TextView(this@PlayerActivity).apply { text = txt; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(14), dp(8), dp(14), dp(8)); background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (active) Color.parseColor("#c026d3") else Color.parseColor("#2a2a2a")) }; setOnClickListener { setSpeed(txt) } }
         }
         speedRow.addView(speedBtn("0.5x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
         speedRow.addView(speedBtn("0.75x", false), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
@@ -214,19 +219,33 @@ class PlayerActivity : Activity() {
     }
 
     private fun togglePlay() {
-        if (isPlaying) { mpvView?.pause(); isPlaying = false; playBtn?.text = "▶"; centerPlay?.visibility = View.VISIBLE }
-        else { mpvView?.play(); isPlaying = true; playBtn?.text = "⏸"; centerPlay?.visibility = View.GONE }
+        val mpv = mpvView?.mpv
+        if (isPlaying) {
+            mpv?.setString("pause", "yes")
+            isPlaying = false; playBtn?.text = "▶"; centerPlay?.visibility = View.VISIBLE
+        } else {
+            mpv?.setString("pause", "no")
+            isPlaying = true; playBtn?.text = "⏸"; centerPlay?.visibility = View.GONE
+        }
     }
 
     private fun setAspect(mode: String) {
         try {
+            val mpv = mpvView?.mpv
             when (mode) {
-                "contain" -> { mpvView?.setProperty("video-aspect-override", "no"); mpvView?.setProperty("panscan", "0.0") }
-                "cover" -> { mpvView?.setProperty("panscan", "1.0") }
-                "16/9" -> mpvView?.setProperty("video-aspect-override", "16:9")
-                "4/3" -> mpvView?.setProperty("video-aspect-override", "4:3")
-                "Pan/Scan" -> mpvView?.setProperty("panscan", "1.0")
+                "contain" -> { mpv?.setString("video-aspect-override", "no"); mpv?.setString("panscan", "0.0") }
+                "cover" -> { mpv?.setString("panscan", "1.0") }
+                "16/9" -> mpv?.setString("video-aspect-override", "16:9")
+                "4/3" -> mpv?.setString("video-aspect-override", "4:3")
+                "Pan/Scan" -> mpv?.setString("panscan", "1.0")
             }
+        } catch (e: Exception) {}
+    }
+
+    private fun setSpeed(txt: String) {
+        try {
+            val s = txt.replace("x","").toDoubleOrNull() ?: 1.0
+            mpvView?.mpv?.setString("speed", s.toString())
         } catch (e: Exception) {}
     }
 
