@@ -88,16 +88,19 @@ object YtAudioSource {
 
         // 1) audio-only — DATA BACHANE ke liye sab se KAM bitrate wali pehle (build 16)
         //    (YouTube filhal ye streams nahi deta, magar jab de to sab se halki chuni jaye)
-        run {
-            val audio = extractor.audioStreams
-                ?.filter { !it.url.isNullOrBlank() }
-                ?.sortedBy { it.averageBitrate }
-            val pick = audio?.firstOrNull { it.averageBitrate >= 60 } ?: audio?.firstOrNull()
-            if (pick != null) {
-                candidates.add(pick.url to "audio ${pick.averageBitrate}kbps ${pick.format}")
-                audio.filter { it !== pick }.forEach { s2 ->
-                    candidates.add(s2.url to "audio ${s2.averageBitrate}kbps ${s2.format}")
-                }
+        val audioList = extractor.audioStreams
+            ?.filter { !it.url.isNullOrBlank() }
+            ?.sortedBy { it.averageBitrate }
+        if (audioList != null && audioList.isNotEmpty()) {
+            val pick = audioList.firstOrNull { it.averageBitrate >= 60 } ?: audioList[0]
+            val pickUrl = pick.url
+            if (!pickUrl.isNullOrBlank()) {
+                candidates.add(pickUrl to "audio ${pick.averageBitrate}kbps ${pick.format}")
+            }
+            for (s2 in audioList) {
+                if (s2 === pick) continue
+                val u2 = s2.url
+                if (!u2.isNullOrBlank()) candidates.add(u2 to "audio ${s2.averageBitrate}kbps ${s2.format}")
             }
         }
 
