@@ -10,8 +10,8 @@ android {
         applicationId = "app.smart.mpv.party"
         minSdk = 24
         targetSdk = 35
-        versionCode = 57
-        versionName = "57-PURE-NATIVE-HTML-DESIGN-MPV-ONLY"
+        versionCode = 58
+        versionName = "58-CRASH-FIXED-PURE-NATIVE"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     buildTypes {
