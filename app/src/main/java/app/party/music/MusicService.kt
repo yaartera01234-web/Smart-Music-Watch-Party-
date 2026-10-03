@@ -18,11 +18,8 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 
 /**
- * Foreground media-playback service. Three layers keep the party alive in background:
- *  1. Foreground service + notification  -> process is never killed
- *  2. Partial wake lock                  -> CPU (and WebView audio) runs with screen off
- *  3. Audio focus + MediaSession         -> Android treats us as a real music app, so its
- *     media pipeline (and OEM battery savers) leave the audio alone
+ * PURE NATIVE MPV - Foreground service to keep MPV playback alive
+ * No WebView, No HTML
  */
 class MusicService : Service() {
 
@@ -35,13 +32,11 @@ class MusicService : Service() {
         running = true
         if (wakeLock == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "musicparty:audio")
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mpvparty:audio")
                 .apply { acquire(); wakeHeld = true }
         }
-
         takeAudioFocus()
         startMediaSession()
-
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(1, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } else {
@@ -73,7 +68,7 @@ class MusicService : Service() {
 
     private fun startMediaSession() {
         if (session != null) return
-        val s = MediaSessionCompat(this, "musicparty")
+        val s = MediaSessionCompat(this, "mpvparty")
         s.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(PlaybackStateCompat.STATE_PLAYING, -1, 1f)
@@ -88,7 +83,7 @@ class MusicService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
-                NotificationChannel("music", "Music Watch Party", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel("mpv", "Smart MPV Party", NotificationManager.IMPORTANCE_LOW)
             )
         }
         val open = PendingIntent.getActivity(
@@ -96,11 +91,11 @@ class MusicService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         @Suppress("DEPRECATION")
-        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "music")
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "mpv")
         else Notification.Builder(this)
         return builder
-            .setContentTitle("Music Watch Party")
-            .setContentText("Party chal rahi hai — background playback active")
+            .setContentTitle("Smart MPV Party")
+            .setContentText("MPV 0.3.0 pure native - playing")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(open)
             .setOngoing(true)
@@ -108,11 +103,7 @@ class MusicService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        stopSelf()
-    }
-
+    override fun onTaskRemoved(rootIntent: Intent?) { stopSelf() }
     override fun onDestroy() {
         running = false
         wakeHeld = false
@@ -131,7 +122,6 @@ class MusicService : Service() {
     companion object {
         @Volatile var running = false
         @Volatile var wakeHeld = false
-
         fun start(context: Context) {
             val i = Intent(context, MusicService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
