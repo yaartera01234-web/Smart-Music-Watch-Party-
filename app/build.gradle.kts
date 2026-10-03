@@ -3,10 +3,6 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-configurations.configureEach {
-    exclude(group = "io.github.yuroyami", module = "libmpvkt-native")
-}
-
 android {
     namespace = "app.party.music"
     compileSdk = 35
@@ -15,8 +11,8 @@ android {
         applicationId = "app.party.music"      // ORIGINAL app ka package (V111/v48 users ke upar update)
         minSdk = 24
         targetSdk = 35
-        versionCode = 113                      // installed app 48 hai -> update install ho jayega
-        versionName = "113-OLD-MPV"
+        versionCode = 114                      // installed 113/48 se bara -> update install hoga
+        versionName = "114-MPV-BG"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -68,10 +64,7 @@ dependencies {
 
     // ══════════ v111-FIX: LOCK SCREEN / BACKGROUND AUDIO ENGINE ══════════
     // MPV core (vid=no => audio only, surface ki zarurat nahi => lock screen par bhi chalta hai)
-    // v113: Maven wala native module band (us me naya FFmpeg hai) — uski jagah app/libs ka
-    // custom AAR use hota hai jis me Synkplay 0.23.0 wali PURANI libs (mpv + FFmpeg v62) hain.
     implementation("io.github.yuroyami:libmpvkt:0.3.0")
-    implementation(files("libs/libmpvkt-native-compat.aar"))
     // YouTube ke liye asli audio stream URL (MPV ko YouTube ka page nahi, seedha stream milta hai)
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
     implementation("org.jsoup:jsoup:1.17.2")

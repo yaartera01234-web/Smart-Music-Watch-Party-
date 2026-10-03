@@ -27,30 +27,36 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-113-OLDLIBS.apk
-          ls -lh Music-Watch-Party-113-OLDLIBS.apk
+          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-114-UPDATE.apk
+          ls -lh Music-Watch-Party-114-UPDATE.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: Music-Watch-Party-APK
-          path: Music-Watch-Party-113-OLDLIBS.apk
+          path: Music-Watch-Party-114-UPDATE.apk
 
       - name: Release APK (download link)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v113
-          name: Music Watch Party — v113 (PURANA MPV/FFmpeg — test build)
+          tag_name: v114
+          name: Music Watch Party — v114 (naya MPV)
           body: |
-            **Music-Watch-Party-113-OLDLIBS.apk** — TEST BUILD
-
-            Isme wahi purani native libraries hain jo Synkplay 0.23.0 me thi
-            (purana FFmpeg v62 + wahi mpv core). Baqi sab kuch bilkul same hai —
-            YouTube, party sync, lock screen, auto-next, chat.
+            **Music-Watch-Party-114-UPDATE.apk**
 
             Apni MOJOODA "Music Watch Party" app ke upar install karo —
-            uninstall ki zaroorat NAHI (same package app.party.music + same key).
+            uninstall ki zaroorat NAHI. Chat / party data safe rehta hai
+            (same package app.party.music + same key).
 
-            Purana v112 yahan maujood hai: releases/tag/v112
-          files: Music-Watch-Party-113-OLDLIBS.apk
+            Naya kya hai:
+            - Lock screen / background par gaana chalta hai (MPV engine)
+            - Lock/unlock par gaana wahin se chalta hai, restart nahi hota
+            - Auto-next lock me bhi chalta hai
+            - Lock ke baad gaana 1-2 second me shuru (fast start)
+            - App band karne par stream cache clear
+            - YouTube: pehle jaisa hi (video + lock screen)
+            - AV1/MKV files MPV par nahi bheji jati (crash nahi hota)
+
+            (v113 wale purane native libs ka test flop ho gaya tha - ab wapas naya MPV.)
+          files: Music-Watch-Party-114-UPDATE.apk
