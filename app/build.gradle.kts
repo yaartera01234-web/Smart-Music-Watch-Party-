@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music"      // ORIGINAL app ka package (V111/v48 users ke upar update)
         minSdk = 24
         targetSdk = 35
-        versionCode = 115                      // installed 114/113/48 se bara -> seedha update install hoga
-        versionName = "115-MPV-YTVIDEO"
+        versionCode = 116                      // installed 115/114/113/48 se bara -> seedha update install hoga
+        versionName = "116-MPV-YTVIDEO-SYNC"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }

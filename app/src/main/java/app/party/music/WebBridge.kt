@@ -436,7 +436,12 @@ object WebBridge {
               seekBy: window.premiumSeekBy,
               toggleMute: window.premiumToggleMute,
               mediaState: window.premiumMediaState,
-              playOnclick: null, bigOnclick: null, muteOnclick: null, pbOnclick: pb ? pb.onclick : null
+              playOnclick: null, bigOnclick: null, muteOnclick: null, pbOnclick: pb ? pb.onclick : null,
+              /* party sync (MQTT se aane wali commands) — ye bhi MPV par lagengi */
+              remotePlay: window.remotePlay,
+              remotePause: window.remotePause,
+              remoteSeek: window.remoteSeek,
+              applyState: window.applyState
             };
             var ePlay = document.getElementById('premium-video-play');
             var eBig = document.getElementById('premium-video-big-play');
@@ -482,6 +487,63 @@ object WebBridge {
                 try { var m = window.premiumMediaState(); if (m && m.time >= 0) window.__wpMpvCmd('seekabs:' + m.time); } catch (e) {}
               }, 350);
             };
+            /* ---- PARTY SYNC: doosron ki commands (play/pause/seek/sync/state) bhi MPV par lagao.
+               Page (MQTT) apni rule waise hi chalatа hai (chhupa iframe update hota rehta hai),
+               magar asli tasveer/aawaz MPV ki hai — is liye wahan bhi wahi command jaani chahiye. ---- */
+            window.remotePlay = function (t, force) {
+              var doApply = true;
+              try { if (!force && typeof localHoldUntil !== 'undefined' && Date.now() < localHoldUntil) doApply = false; } catch (e) {}
+              try { if (O.remotePlay) O.remotePlay.apply(this, arguments); } catch (e) {}
+              try {
+                if (doApply && window.__wpMpvLinked) {
+                  if (typeof t === 'number' && isFinite(t) && t >= 0) window.__wpMpvCmd('seekabs:' + t);
+                  window.__wpMpvCmd('play');
+                }
+              } catch (e) {}
+            };
+            window.remotePause = function (t, force) {
+              var doApply = true;
+              try {
+                if (!force && typeof playGraceUntil !== 'undefined') {
+                  var nt = 0;
+                  try { nt = (typeof localNow === 'function') ? localNow() : 0; } catch (e2) {}
+                  if (Date.now() < playGraceUntil && Math.abs(nt - (isFinite(t) ? t : 0)) < 6) doApply = false;
+                }
+              } catch (e) {}
+              try { if (O.remotePause) O.remotePause.apply(this, arguments); } catch (e) {}
+              try {
+                if (doApply && window.__wpMpvLinked) {
+                  if (typeof t === 'number' && isFinite(t) && t >= 0) window.__wpMpvCmd('seekabs:' + t);
+                  window.__wpMpvCmd('pause');
+                }
+              } catch (e) {}
+            };
+            window.remoteSeek = function (t) {
+              try { if (O.remoteSeek) O.remoteSeek.apply(this, arguments); } catch (e) {}
+              try {
+                if (window.__wpMpvLinked && typeof t === 'number' && isFinite(t) && t >= 0) {
+                  window.__wpMpvCmd('seekabs:' + t);
+                }
+              } catch (e) {}
+            };
+            /* naya member aaya / state mili (retained) -> MPV bhi usi position par aa jaye */
+            window.applyState = function (s) {
+              try { if (O.applyState) O.applyState.apply(this, arguments); } catch (e) {}
+              try {
+                if (window.__wpMpvLinked && s && s.type === 'youtube') {
+                  var st = (typeof s.time === 'number' && isFinite(s.time)) ? s.time : 0;
+                  var sp = !!s.playing;
+                  setTimeout(function () {
+                    try {
+                      if (!window.__wpMpvLinked) return;
+                      window.__wpMpvCmd('seekabs:' + st);
+                      window.__wpMpvCmd(sp ? 'play' : 'pause');
+                    } catch (e) {}
+                  }, 1500);
+                }
+              } catch (e) {}
+            };
+
             window.__wpMpvWrap = {
               play: function () { window.premiumTogglePlay(); },
               seekBy: window.premiumSeekBy,
@@ -504,6 +566,10 @@ object WebBridge {
           if (Q.seekBy) window.premiumSeekBy = Q.seekBy;
           if (Q.toggleMute) window.premiumToggleMute = Q.toggleMute;
           if (Q.mediaState) window.premiumMediaState = Q.mediaState;
+          if (Q.remotePlay) window.remotePlay = Q.remotePlay;
+          if (Q.remotePause) window.remotePause = Q.remotePause;
+          if (Q.remoteSeek) window.remoteSeek = Q.remoteSeek;
+          if (Q.applyState) window.applyState = Q.applyState;
           var pe = document.getElementById('premium-video-play');
           if (pe && Q.playOnclick) pe.onclick = Q.playOnclick;
           var be = document.getElementById('premium-video-big-play');
