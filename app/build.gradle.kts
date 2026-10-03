@@ -10,8 +10,8 @@ android {
         applicationId = "app.party.music"
         minSdk = 24
         targetSdk = 35
-        versionCode = 49
-        versionName = "49-MPV-Final"
+        versionCode = 50
+        versionName = "50-MPV-Hybrid-Final"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     splits {
@@ -48,7 +48,9 @@ dependencies {
     implementation("androidx.media3:media3-session:1.4.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
-    // MPV 0.23.0 libmpvKt - pure native player with HW AV1
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    // MPV 0.23.0 libmpvKt - pure native player
     implementation("com.github.yuroyami:libmpvKt:0.23.0")
     // YouTube 360p lock - NewPipeExtractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
