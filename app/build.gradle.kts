@@ -14,14 +14,7 @@ android {
         versionName = "50-MPV-Hybrid-Final"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a")
-            isUniversalApk = false
-        }
-    }
+    // splits removed - ndk abiFilters handles arm64 only (conflict fix)
     buildTypes {
         release { isMinifyEnabled = false }
         debug {
