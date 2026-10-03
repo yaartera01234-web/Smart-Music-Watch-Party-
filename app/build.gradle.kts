@@ -4,14 +4,14 @@ plugins {
 }
 
 android {
-    namespace = "app.party.music"
+    namespace = "app.smart.mpv.party"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.party.music"
+        applicationId = "app.smart.mpv.party"
         minSdk = 24
         targetSdk = 35
-        versionCode = 52
-        versionName = "52-MPV-0.3.0-Hybrid"
+        versionCode = 53
+        versionName = "53-MPV-Hybrid-Different-Package"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     buildTypes {
