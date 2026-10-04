@@ -58,6 +58,12 @@ object NotifHub {
         }
     }
 
+    /** v46: app poora band hone par reply ka intezar — bg service page load hone ke baad
+        bhejti hai, result usi pending entry se complete hota hai. */
+    fun awaitReply(requestId: String, completion: (Boolean) -> Unit) {
+        pendingReplies[requestId] = completion
+    }
+
     /** WebView se MQTT PUBACK result wapas lo; ek request sirf ek dafa complete hoti hai. */
     fun completeReply(requestId: String, sent: Boolean) {
         val done = pendingReplies.remove(requestId) ?: return

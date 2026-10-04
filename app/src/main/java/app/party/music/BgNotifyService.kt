@@ -34,6 +34,7 @@ class BgNotifyService : Service() {
         private const val TAG = "MusicParty"
         private const val NOTE_ID = 4242
         const val NOTE_GONE = "app.party.music.NOTE_GONE"
+        const val ACTION_BG_REPLY = "app.party.music.BG_REPLY"
         private const val URL = "https://yaartera01234-web.github.io/watch-party/party-final1.html?bg=1"
 
         @Volatile var running = false
@@ -58,6 +59,33 @@ class BgNotifyService : Service() {
             }
         }
 
+        /**
+         * v46: app poora band hone par notification Reply — service uthao, chhupa page
+         * load hone par (onPageFinished) reply khud chala jayega.
+         */
+        fun queueReply(ctx: Context, code: String, text: String, requestId: String): Boolean {
+            return try {
+                val i = Intent(ctx, BgNotifyService::class.java)
+                    .setAction(ACTION_BG_REPLY)
+                    .putExtra("code", code)
+                    .putExtra("text", text)
+                    .putExtra("requestId", requestId)
+                if (running) {
+                    try { ctx.startService(i) } catch (t: Throwable) {
+                        if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i)
+                    }
+                } else if (Build.VERSION.SDK_INT >= 26) {
+                    ctx.startForegroundService(i)
+                } else {
+                    ctx.startService(i)
+                }
+                true
+            } catch (t: Throwable) {
+                Log.e(TAG, "queueReply fail", t)
+                false
+            }
+        }
+
         fun stop(ctx: Context) {
             /* stopService before onCreate/startForeground completed caused Android's
                ForegroundServiceDidNotStartInTimeException. */
@@ -70,6 +98,8 @@ class BgNotifyService : Service() {
     private var startedAt = 0L
     private var lastPing = 0L
     private var notePosted = false          /* v39: ek hi dafa note post karo */
+    private var pageReady = false           /* v46: chhupa page load ho chuka hai? */
+    private var pendingReply: Triple<String, String, String>? = null   /* v46: cold reply (code, text, requestId) */
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchdog = object : Runnable {
@@ -78,6 +108,7 @@ class BgNotifyService : Service() {
                 val now = System.currentTimeMillis()
                 if (now - lastPing > 5 * 60 * 1000L) {
                     lastPing = now
+                    pageReady = false
                     Log.w(TAG, "bg ping nahi aaya -> reload")
                     web?.reload()
                 }
@@ -131,6 +162,8 @@ class BgNotifyService : Service() {
             w.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     lastPing = System.currentTimeMillis()
+                    /* v46: page ready -> agar cold-start reply pending hai to ab bhejo */
+                    try { pageReady = true; deliverPendingReply() } catch (t: Throwable) {}
                     try {
                         view?.evaluateJavascript(
                             "(function(){try{window.YaarNative&&window.YaarNative.bgReady&&window.YaarNative.bgReady();}catch(e){}})()",
@@ -145,6 +178,20 @@ class BgNotifyService : Service() {
             Log.e(TAG, "webview fail", t)
         }
         handler.postDelayed(watchdog, 90000)
+    }
+
+    /** v46: pending (cold-start) reply ko chhupe page me chalao — page ready ho chuki ho tab. */
+    private fun deliverPendingReply() {
+        val pr = pendingReply ?: return
+        if (!pageReady) return
+        val w = web ?: return
+        pendingReply = null
+        try {
+            w.post {
+                try { w.evaluateJavascript(NotifHub.quickReplyJs(pr.third, pr.first, pr.second), null) }
+                catch (t: Throwable) { NotifHub.completeReply(pr.third, false) }
+            }
+        } catch (t: Throwable) { NotifHub.completeReply(pr.third, false) }
     }
 
     inner class BgBridge {
@@ -197,6 +244,16 @@ class BgNotifyService : Service() {
             noteMuted = true
             try { prefs(this).edit().putBoolean("noteMuted", true).apply() } catch (t: Throwable) {}
             return START_STICKY
+        }
+        /* v46: notification se reply aaya (app band tha) -> page ready hote hi bhej do */
+        if (intent != null && ACTION_BG_REPLY == intent.action) {
+            val rc = intent.getStringExtra("code") ?: ""
+            val rt = intent.getStringExtra("text") ?: ""
+            val rr = intent.getStringExtra("requestId") ?: ""
+            if (rc.isNotEmpty() && rt.isNotEmpty() && rr.isNotEmpty()) {
+                pendingReply = Triple(rc, rt, rr)
+                handler.postDelayed({ deliverPendingReply() }, 400L)
+            }
         }
         if (!notePosted) {
             try {

@@ -34,7 +34,8 @@ class ReplyReceiver : BroadcastReceiver() {
             val requestId = UUID.randomUUID().toString()
             async = goAsync()
             val pending = async
-            val dispatched = NotifHub.deliverReply(source, code, text, requestId) { sent ->
+            /* v46: result ek hi jagah se (warm + cold dono) */
+            val onResult: (Boolean) -> Unit = { sent ->
                 try {
                     if (sent) {
                         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(nid)
@@ -47,13 +48,21 @@ class ReplyReceiver : BroadcastReceiver() {
                     try { pending?.finish() } catch (t: Throwable) {}
                 }
             }
+            val dispatched = NotifHub.deliverReply(source, code, text, requestId, onResult)
+            var cold = false
             if (!dispatched) {
+                /* v46: app poora band tha (koi zinda WebView nahi) -> background service uthao.
+                   Wo chhupa page load karegi aur page ready hote hi reply khud bhej degi. */
+                NotifHub.awaitReply(requestId, onResult)
+                cold = BgNotifyService.queueReply(ctx, code, text, requestId)
+            }
+            if (!dispatched && !cold) {
                 NotifHub.post(ctx, "⚠️ Reply nahi gaya", "App khol ke dobara bhejein", "reply-fail")
                 pending?.finish()
                 async = null
                 return
             }
-            Handler(Looper.getMainLooper()).postDelayed({ NotifHub.completeReply(requestId, false) }, 9000L)
+            Handler(Looper.getMainLooper()).postDelayed({ NotifHub.completeReply(requestId, false) }, if (cold) 30000L else 9000L)
             async = null // completion owns the PendingResult from here
         } catch (t: Throwable) {
             Log.e("MusicParty", "reply receiver fail", t)
