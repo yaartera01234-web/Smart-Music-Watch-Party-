@@ -27,32 +27,32 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-TEST.apk
-          ls -lh Music-WP-117-TEST.apk
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-TEST2.apk
+          ls -lh Music-WP-117-TEST2.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: Music-Watch-Party-APK
-          path: Music-WP-117-TEST.apk
+          path: Music-WP-117-TEST2.apk
 
       - name: Release APK (download link)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-test
-          name: "Music Watch Party — v117 TEST (quality + volume + sync fix)"
+          tag_name: v117-test2
+          name: "Music Watch Party — v117 TEST2 (144/240 ab sach me 144/240 + volume + sync fix)"
           body: |
-            **Music-WP-117-TEST.apk** — ye ek ALAG package hai (app.party.music.test)
+            **Music-WP-117-TEST2.apk** — ye ek ALAG package hai (app.party.music.test)
 
             Is liye ye aapki mojooda "Music Watch Party" ke SATH install hoga
             (usay chhedta nahi). Pehle test karo, sab theek lage to phir
             original package se asli update bana kar denge.
 
             Naya kya hai:
-            - 🎚️ Quality button: player me 144p / 240p / 360p (slow net ke liye)
+            - 🎚️ Quality button: 144p / 240p / 360p (ab 144/240 par ASLI 144/240 stream — data bachega)
             - 🔊 Volume fix: call ke baad media volume 0 par bhi aawaz aane wala bug
             - 🔄 Sync fix: dost ki play/pause/seek ab aapke MPV par bhi
             - 🌐 Slow net: bara cache (96MB) + "⏳ Buffering %" + khud recovery
             - 🎬 YouTube poora MPV par (video + audio) + fullscreen + lock screen
-          files: Music-WP-117-TEST.apk
+          files: Music-WP-117-TEST2.apk

@@ -95,8 +95,22 @@ object YtAudioSource {
         val muxedList = extractor.videoStreams
             ?.filter { !it.isVideoOnly && !it.url.isNullOrBlank() }
 
+        if (preferHeight > 0 && preferHeight <= 240) {
+            /* 🎚️ SLOW-NET / DATA SAVER (144p / 240p):
+               pehle BILKUL wahi height (video-only) + halki alag audio.
+               Wajah: YouTube ki 360p muxed stream "sab se qareeb" hone ki wajah se pehle jeet jati thi —
+               144p maangne par bhi 360p ka poora data kharch hota tha. Ab muxed sirf MAJBOORI me. */
+            val vo = extractor.videoStreams?.filter { it.isVideoOnly && !it.url.isNullOrBlank() }
+            val v = (vo?.filter { (it.height ?: 0) in 1..preferHeight }?.maxByOrNull { it.height ?: 0 })
+                ?: (vo?.filter { (it.height ?: 0) > preferHeight }?.minByOrNull { it.height ?: Int.MAX_VALUE })
+            val vu = v?.url
+            if (!vu.isNullOrBlank()) {
+                extraAudio = (audioList?.firstOrNull { it.averageBitrate >= 60 } ?: audioList?.firstOrNull())?.url
+                candidates.add(vu to "video-only ${v?.height}p + alag audio (maangi ${preferHeight}p)")
+            }
+        }
         if (preferHeight > 0) {
-            // TEST APP (YouTube VIDEO): 360p ke sab se qareeb muxed (audio+video) stream pehle
+            // 360p (default) ya upar wala rasta na chal saka: 360p ke sab se qareeb muxed (audio+video) stream
             muxedList
                 ?.sortedBy { Math.abs((it.height ?: 360) - preferHeight) }
                 ?.forEach { st ->
