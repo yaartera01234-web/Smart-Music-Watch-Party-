@@ -1120,6 +1120,7 @@ class MainActivity : Activity() {
             if (q == ytQuality && mpvVideo.hasFrame()) return      // wahi quality pehle se
             val id = ytVideoId
             if (id.isBlank() || ytVideoState != 2) { ytQuality = q; return }
+            val prevQ = ytQuality                                 // fail hua to isi par wapas
             ytQuality = q
             val pos = mpvVideo.position()
             val wasPlaying = !mpvVideo.isPaused()
@@ -1130,7 +1131,9 @@ class MainActivity : Activity() {
                     try {
                         if (ytVideoId != id || ytVideoState != 2) return@post
                         if (r == null) {   // naya stream nahi mila -> purana hi chalta rahe
-                            showBanner("⚠️ ${q}p stream nahi mili — ${ytQuality}p hi chal rahi hai")
+                            ytQuality = prevQ
+                            showBanner("⚠️ ${q}p stream nahi mili — ${prevQ}p hi chal rahi hai")
+                            try { web.evaluateJavascript(WebBridge.mpvQualityJs(prevQ), null) } catch (t: Throwable) {}
                             return@post
                         }
                         ytLastUrl = r.url

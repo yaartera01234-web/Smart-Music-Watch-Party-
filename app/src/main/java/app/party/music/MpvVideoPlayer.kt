@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.View
 import android.widget.FrameLayout
 import io.github.yuroyami.libmpvkt.MpvProperties
+import io.github.yuroyami.libmpvkt.getOrNull
 import io.github.yuroyami.libmpvkt.view.MpvOptions
 import io.github.yuroyami.libmpvkt.view.MpvView
 import java.util.concurrent.Executors
