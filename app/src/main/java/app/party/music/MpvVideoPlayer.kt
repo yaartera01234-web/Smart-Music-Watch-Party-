@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.FrameLayout
+import io.github.yuroyami.libmpvkt.MpvProperties
 import io.github.yuroyami.libmpvkt.view.MpvOptions
 import io.github.yuroyami.libmpvkt.view.MpvView
 import java.util.concurrent.Executors
@@ -45,7 +46,7 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
                 val v = view ?: return@post
                 io.execute {
                     try {
-                        val prepared = v.prepare(MpvOptions())
+                        val prepared = v.prepare(slowNetOptions())
                         main.post {
                             try {
                                 v.attach(prepared)
@@ -163,6 +164,36 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
             view = null; coreReady = false; ensuring = false
         }
     }
+
+    /* SLOW NET: bara cache + network timeouts + reconnect.
+       - demuxer cache: 96MB aage + 24MB peeche (360p par ~20+ minute buffer)
+       - readahead 300s: jitna net deta hai, utna aage bharta rahe (ruke nahi)
+       - network-timeout 30s + lavf reconnect: stream toote to khud jude
+       - cache-pause-wait 2s: cache khali ho to 2s ruk kar bhare, phir chale (kam stop-start) */
+    private fun slowNetOptions(): MpvOptions = MpvOptions(
+        demuxerMaxBytes = 96L * 1024 * 1024,
+        extra = mapOf(
+            "demuxer-max-back-bytes" to (24L * 1024 * 1024).toString(),
+            "demuxer-readahead-secs" to "300",
+            "cache" to "yes",
+            "cache-secs" to "300",
+            "cache-pause-wait" to "2",
+            "network-timeout" to "30",
+            "stream-lavf-o" to "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5"
+        )
+    )
+
+    /** Cache khali hui to MPV khud ruk jata hai (buffering) — user ko dikhane ke liye. */
+    fun buffering(): Boolean = try {
+        val mpv = view?.mpv ?: return false
+        mpv[MpvProperties.PausedForCache].getOrNull() == true
+    } catch (t: Throwable) { false }
+
+    /** Buffer kitna bhar chuka (0-100%). */
+    fun cachePct(): Int = try {
+        val mpv = view?.mpv ?: return 0
+        (mpv[MpvProperties.CacheBufferingState].getOrNull() ?: 0L).toInt().coerceIn(0, 100)
+    } catch (t: Throwable) { 0 }
 
     private fun dp(v: Int): Int = (v * act.resources.displayMetrics.density).toInt()
 

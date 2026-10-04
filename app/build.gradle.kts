@@ -8,12 +8,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.party.music"      // ORIGINAL app ka package (V111/v48 users ke upar update)
+        applicationId = "app.party.music.test"  // ⚠️ TEST BUILD — alag package (side-by-side install, original app chhua nahi jayega)
         minSdk = 24
         targetSdk = 35
-        versionCode = 116                      // installed 115/114/113/48 se bara -> seedha update install hoga
-        versionName = "116-MPV-YTVIDEO-SYNC"
-        manifestPlaceholders["appLabel"] = "Music Watch Party"
+        versionCode = 117                      // TEST
+        versionName = "117-TEST-QA"
+        manifestPlaceholders["appLabel"] = "Music WP TEST"   // asli app se pehchaan ke liye
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

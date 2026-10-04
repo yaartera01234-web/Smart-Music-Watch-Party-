@@ -264,6 +264,19 @@ class CallForegroundService : Service() {
         try { if (callWakeLock?.isHeld == true) callWakeLock?.release() } catch (_: Throwable) {}
         callWakeLock = null
         running = false
+        /* 🔊 FIX (v117): call background me khatam ho to page ka reset JS nahi chalta tha ->
+           phone "call mode" me atka reh jata tha aur Media volume 0 karne par bhi awaz aati thi.
+           Ab service band hote hi (chahe app background me ho) audio mode normal kar dete hain. */
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            try { am.mode = android.media.AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+            try { am.isSpeakerphoneOn = false } catch (_: Throwable) {}
+            try { am.isMicrophoneMute = false } catch (_: Throwable) {}
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try { am.clearCommunicationDevice() } catch (_: Throwable) {}
+            }
+            try { am.abandonAudioFocus(null) } catch (_: Throwable) {}
+        } catch (_: Throwable) {}
         super.onDestroy()
     }
 

@@ -27,23 +27,23 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-116-UPDATE.apk
-          ls -lh Music-Watch-Party-116-UPDATE.apk
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-TEST.apk
+          ls -lh Music-WP-117-TEST.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: Music-Watch-Party-APK
-          path: Music-Watch-Party-116-UPDATE.apk
+          path: Music-WP-117-TEST.apk
 
       - name: Release APK (download link)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v116
-          name: Music Watch Party — v116 (party sync bhi MPV par)
+          tag_name: v117-test
+          name: Music Watch Party — v117 TEST (quality button + volume fix) [alag package: app.party.music.test]
           body: |
-            **Music-Watch-Party-116-UPDATE.apk**
+            **Music-WP-117-TEST.apk**
 
             Apni MOJOODA "Music Watch Party" app ke upar install karo —
             uninstall ki zaroorat NAHI. Chat / party data safe rehta hai
@@ -59,4 +59,4 @@ jobs:
             - AV1/MKV files MPV par nahi bheji jati (crash nahi hota)
 
             (v113 wale purane native libs ka test flop ho gaya tha - ab wapas naya MPV.)
-          files: Music-Watch-Party-116-UPDATE.apk
+          files: Music-WP-117-TEST.apk

@@ -115,6 +115,15 @@ class MainActivity : Activity() {
     @Volatile private var ytLastPlaying: Boolean = false
     @Volatile private var ytFsOn: Boolean = false       // apna fullscreen (Android ka kala nahi)
     @Volatile private var ytHandbackDone: Boolean = false
+    @Volatile private var lastYtBuf: Boolean = false      // slow net: buffering indicator ki aakhri halat
+    @Volatile private var lastYtBufPct: Int = 0
+    @Volatile private var ytStallPos: Double = -1.0        // video ruki to pakarne ke liye
+    @Volatile private var ytStallAt: Long = 0L
+    @Volatile private var ytSlowBanner: Boolean = false
+    @Volatile private var ytQuality: Int = 360            // user ki chuni hui quality (144/240/360)
+    @Volatile private var ytLastUrl: String = ""          // fallback ke liye aakhri stream
+    @Volatile private var ytLastAudio: String? = null
+    private var fsTick: Int = 0
 
     private val snapPoller = object : Runnable {
         override fun run() {
@@ -129,6 +138,12 @@ class MainActivity : Activity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_SCREEN_OFF) {
                 try { handoffNow("screen-off") } catch (t: Throwable) {}
+                try {   /* lock ke waqt bhi audio mode saaf kar do (call background me khatam hui ho to) */
+                    if (!CallForegroundService.running) {
+                        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                        if (am.mode != android.media.AudioManager.MODE_NORMAL) resetCallAudioRoute()
+                    }
+                } catch (t: Throwable) {}
             }
         }
     }
@@ -469,7 +484,7 @@ class MainActivity : Activity() {
                         if (v != ytVideoId) {
                             // stream abhi se tayyar kar lo -> MPV foran shuru ho jayega
                             ytResolver.execute {
-                                try { YtAudioSource.resolve(v, validate = false, preferHeight = 360) } catch (t: Throwable) {}
+                                try { YtAudioSource.resolve(v, validate = false, preferHeight = ytQuality) } catch (t: Throwable) {}
                             }
                             pollSnapshot()
                         }
@@ -979,15 +994,19 @@ class MainActivity : Activity() {
         if (wantId.isBlank() || wantId.length != 11) return
         ytVideoId = wantId
         ytVideoState = 1
+        ytSlowBanner = false
+        ytStallPos = -1.0
         mpvVideo.ensure()
         setYtMute(true)          // page ki aawaz foran band — MPV jab tayyar hoga aawaz dega
         ytResolver.execute {
             // 360p (user ki marzi) — muxed me 360p ke sab se qareeb; na mile to video + alag audio
-            val r = try { YtAudioSource.resolve(wantId, validate = false, preferHeight = 360) } catch (t: Throwable) { null }
+            val r = try { YtAudioSource.resolve(wantId, validate = false, preferHeight = ytQuality) } catch (t: Throwable) { null }
             handoffHandler.post {
                 try {
                     if (ytVideoId != wantId) return@post
                     if (r == null) { failYtVideo(wantId, "stream nahi mili"); return@post }
+                    ytLastUrl = r.url
+                    ytLastAudio = r.audioUrl
                     mpvVideo.play(r.url, wantPos, startMuted = true)
                     if (!r.audioUrl.isNullOrBlank()) mpvVideo.addAudio(r.audioUrl)   // video-only case: aawaz alag se
                     if (!wantPlay) mpvVideo.pause()
@@ -1005,7 +1024,12 @@ class MainActivity : Activity() {
                     if (ytVideoId != id) return
                     if (mpvVideo.hasFrame()) { activateYtVideo(id); return }
                     val err = mpvVideo.error
-                    if (err != null || attempt >= 40) { failYtVideo(id, err); return }
+                    // slow net: pehla frame aane me waqt lag sakta hai -> 30s tak intezaar (user ko dikhao)
+                    if (attempt == 16 && !ytSlowBanner) {
+                        ytSlowBanner = true
+                        showBanner("⏳ YouTube load ho raha hai (net slow)…")
+                    }
+                    if (err != null || attempt >= 120) { failYtVideo(id, err); return }
                     armYtWatch(id, attempt + 1)
                 } catch (t: Throwable) {}
             }
@@ -1022,6 +1046,10 @@ class MainActivity : Activity() {
             updateYtRect()
             mpvVideo.setMuted(false)
             ytVideoState = 2
+            try { web.evaluateJavascript(WebBridge.mpvQualityJs(ytQuality), null) } catch (t: Throwable) {}
+            ytStallPos = -1.0
+            lastYtBuf = false; lastYtBufPct = 0
+            try { web.evaluateJavascript(WebBridge.mpvBufJs(false, 0), null) } catch (t: Throwable) {}
             if (!ytVideoBanner) { ytVideoBanner = true; showBanner("🎬 YouTube MPV par (video + audio)") }
             Log.i("MusicParty", "yt video active: $id")
         } catch (t: Throwable) {}
@@ -1034,6 +1062,8 @@ class MainActivity : Activity() {
             Log.w("MusicParty", "yt video fail: $err")
             setYtMute(false)
             quitYtFsQuiet()
+            try { web.evaluateJavascript(WebBridge.mpvBufJs(false, 0), null) } catch (t: Throwable) {}
+            lastYtBuf = false
             mpvVideo.stop(); mpvVideo.hide(); setYtHole(false); setYtLink(false)
             ytVideoState = 3
             ytFailAt = System.currentTimeMillis()
@@ -1047,6 +1077,8 @@ class MainActivity : Activity() {
         try {
             if (ytVideoState == 0 && ytVideoId.isBlank()) return
             quitYtFsQuiet()
+            try { web.evaluateJavascript(WebBridge.mpvBufJs(false, 0), null) } catch (t: Throwable) {}
+            lastYtBuf = false
             ytVideoId = ""
             ytVideoState = 0
             ytVideoTry = 0
@@ -1077,6 +1109,68 @@ class MainActivity : Activity() {
                         }
                     }
                 } catch (t: Throwable) {}
+            }
+        } catch (t: Throwable) {}
+    }
+
+    /** 🎚️ Quality badli: naya stream usi jagah se chalao (aawaz alag wali bhi jodi jaye). */
+    private fun switchYtQuality(h: Int) {
+        try {
+            val q = if (h <= 144) 144 else if (h <= 240) 240 else 360
+            if (q == ytQuality && mpvVideo.hasFrame()) return      // wahi quality pehle se
+            val id = ytVideoId
+            if (id.isBlank() || ytVideoState != 2) { ytQuality = q; return }
+            ytQuality = q
+            val pos = mpvVideo.position()
+            val wasPlaying = !mpvVideo.isPaused()
+            showBanner("🎚️ Quality: ${q}p")
+            ytResolver.execute {
+                val r = try { YtAudioSource.resolve(id, validate = false, preferHeight = q) } catch (t: Throwable) { null }
+                handoffHandler.post {
+                    try {
+                        if (ytVideoId != id || ytVideoState != 2) return@post
+                        if (r == null) {   // naya stream nahi mila -> purana hi chalta rahe
+                            showBanner("⚠️ ${q}p stream nahi mili — ${ytQuality}p hi chal rahi hai")
+                            return@post
+                        }
+                        ytLastUrl = r.url
+                        ytLastAudio = r.audioUrl
+                        mpvVideo.play(r.url, pos, startMuted = false)
+                        if (!r.audioUrl.isNullOrBlank()) mpvVideo.addAudio(r.audioUrl)
+                        if (!wasPlaying) mpvVideo.pause()
+                        web.evaluateJavascript(WebBridge.mpvQualityJs(q), null)
+                        Log.i("MusicParty", "quality switch -> ${q}p @ $pos")
+                    } catch (t: Throwable) {}
+                }
+            }
+        } catch (t: Throwable) {}
+    }
+
+    /** Slow net ya URL expire: position kuch der se nahi barhi -> dobara koshish; baar baar ho to page par wapas.
+        (App tang nahi karta: MPV apni thread par chalta hai; ye sirf recovery hai.) */
+    private fun checkYtStall() {
+        try {
+            if (ytVideoState != 2) return
+            if (mpvVideo.isPaused()) { ytStallPos = -1.0; return }
+            val p = mpvVideo.position()
+            val now = System.currentTimeMillis()
+            if (ytStallPos < 0 || kotlin.math.abs(p - ytStallPos) > 0.3) {
+                ytStallPos = p; ytStallAt = now
+                return
+            }
+            // buffering ho to zyada mohlat (slow net normal hai), warna 25s
+            val limit = if (mpvVideo.buffering()) 60000L else 25000L
+            if (now - ytStallAt > limit) {
+                if (ytVideoTry < 4) {
+                    ytLastPos = p
+                    ytLastPlaying = true
+                    showBanner("⏳ Net slow — MPV dobara koshish kar raha hai…")
+                    retryYtVideo()
+                } else {
+                    showBanner("⚠️ Net bohat slow — is waqt page player par chala diya")
+                    endYtVideo()
+                }
+                ytStallPos = -1.0; ytStallAt = now
             }
         } catch (t: Throwable) {}
     }
@@ -1133,6 +1227,7 @@ class MainActivity : Activity() {
             if (c == "rect") { updateYtRect(); return }      // fullscreen/resize: foran surface set karo
             if (c == "fs:1") { enterYtFs(); return }
             if (c == "fs:0") { exitYtFs(); return }
+            if (c.startsWith("quality:")) { c.substringAfter(':').toIntOrNull()?.let { switchYtQuality(it) }; return }
             if (ytVideoState != 2) return
             when {
                 c == "toggle" || c == "playpause" -> if (mpvVideo.isPaused()) mpvVideo.resume() else mpvVideo.pause()
@@ -1205,6 +1300,22 @@ class MainActivity : Activity() {
                         null
                     )
                     updateYtRect()
+                    // slow net: buffering ho raha hai? -> page par "⏳ Buffering" dikhao
+                    val buf = mpvVideo.buffering()
+                    val bpct = if (buf) mpvVideo.cachePct() else 0
+                    if (buf != lastYtBuf || (buf && kotlin.math.abs(bpct - lastYtBufPct) >= 8)) {
+                        lastYtBuf = buf; lastYtBufPct = bpct
+                        web.evaluateJavascript(WebBridge.mpvBufJs(buf, bpct), null)
+                    }
+                    checkYtStall()   // video ruki hui hai? -> khud recovery
+                }
+            } catch (t: Throwable) {}
+            // 🔊 watchdog: call khatam ho gaya magar audio mode atka (volume zero par bhi awaz) -> theek karo
+            try {
+                fsTick++
+                if (fsTick % 20 == 0 && !CallForegroundService.running) {
+                    val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    if (am.mode != android.media.AudioManager.MODE_NORMAL) resetCallAudioRoute()
                 }
             } catch (t: Throwable) {}
             handoffHandler.postDelayed(this, 450L)

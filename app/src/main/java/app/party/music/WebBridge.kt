@@ -343,7 +343,10 @@ object WebBridge {
           'body.wp-mpv-on #premium-video-ui.controls-hidden{opacity:1 !important;background:transparent !important;}' +
           'body.wp-mpv-on #premium-video-ui.controls-hidden .premium-video-top,' +
           'body.wp-mpv-on #premium-video-ui.controls-hidden .premium-video-center,' +
-          'body.wp-mpv-on #premium-video-ui.controls-hidden .premium-video-bottom{opacity:1 !important;}';
+          'body.wp-mpv-on #premium-video-ui.controls-hidden .premium-video-bottom{opacity:1 !important;}' +
+          /* MPV mode: quality button dikhao (page ne isay display:none kar rakha hai) */
+          'body.wp-mpv-on #premium-video-quality{display:inline-block !important;max-width:74px !important;height:27px !important;}' +
+          'body.wp-mpv-on #premium-video-quality.hidden{display:inline-block !important;}';
         var wrap = document.querySelector('.player-wrap');
         var r = (wrap && wrap.getBoundingClientRect) ? wrap.getBoundingClientRect() : null;
         var W = window.innerWidth || document.documentElement.clientWidth;
@@ -553,6 +556,25 @@ object WebBridge {
             };
           }
           window.__wpMpvAssert();
+          try {
+            /* 🎚️ QUALITY BUTTON: 144p / 240p / 360p (MPV par lagta hai) */
+            var q = document.getElementById('premium-video-quality');
+            if (q) {
+              if (!window.__wpMpvQBound) {
+                window.__wpMpvQBound = 1;
+                q.addEventListener('change', function () {
+                  window.__wpMpvQVal = q.value;
+                  window.__wpMpvCmd('quality:' + q.value);
+                });
+              }
+              if (!q.options || q.options.length !== 3) {
+                q.innerHTML = '<option value="144">144p</option><option value="240">240p</option><option value="360">360p</option>';
+              }
+              q.value = String(window.__wpMpvQVal || 360);
+              q.classList.remove('hidden');
+              q.style.display = 'inline-block';
+            }
+          } catch (e) {}
           try { updatePremiumVideoUI(); } catch (e) {}
           try { updateMiniInfo(); } catch (e) {}
           return 'ok';
@@ -578,6 +600,8 @@ object WebBridge {
           if (me && Q.muteOnclick) me.onclick = Q.muteOnclick;
           var fe2 = document.getElementById('premium-video-fullscreen');
           if (fe2 && Q.fsOnclick) fe2.onclick = Q.fsOnclick;
+          var q2 = document.getElementById('premium-video-quality');
+          if (q2) { q2.style.display = ''; q2.classList.add('hidden'); }
           if (pb && Q.pbOnclick) pb.onclick = Q.pbOnclick;
           if (ui) {
             ui.style.display = ''; ui.style.opacity = ''; ui.style.pointerEvents = '';
@@ -621,6 +645,47 @@ object WebBridge {
           if (fe && W.fs && fe.onclick !== W.fs) fe.onclick = W.fs;
         }
         try { document.body.classList.add('wp-mpv-on'); } catch (e) {}
+        return 'ok';
+      } catch (e) { return 'fail'; }
+    };
+
+    /* ---- 16c) slow net: "⏳ Buffering" overlay ---- */
+    window.__wpMpvBuf = function (on, pct) {
+      try {
+        var wrap = document.querySelector('.player-wrap');
+        var d = document.getElementById('wp-mpv-buf');
+        if (!d) {
+          d = document.createElement('div');
+          d.id = 'wp-mpv-buf';
+          d.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:30;' +
+            'padding:10px 16px;border-radius:14px;background:rgba(10,8,25,.88);border:1px solid rgba(255,255,255,.22);' +
+            'color:#fff;font:800 12px/1.3 system-ui,sans-serif;text-align:center;display:none;pointer-events:none;' +
+            'box-shadow:0 10px 26px rgba(0,0,0,.45);';
+          (wrap || document.body).appendChild(d);
+        }
+        if (on) {
+          d.textContent = '⏳ Buffering…' + (pct > 0 ? ' ' + pct + '%' : '');
+          d.style.display = 'block';
+        } else {
+          d.style.display = 'none';
+        }
+        return 'ok';
+      } catch (e) { return 'fail'; }
+    };
+
+    /* ---- 16d) MPV ki chuni hui quality select par dikhao ---- */
+    window.__wpMpvQ = function (sel) {
+      try {
+        window.__wpMpvQVal = sel;
+        var q = document.getElementById('premium-video-quality');
+        if (q) {
+          if (!q.options || q.options.length !== 3) {
+            q.innerHTML = '<option value="144">144p</option><option value="240">240p</option><option value="360">360p</option>';
+          }
+          q.value = String(sel);
+          q.classList.remove('hidden');
+          if (window.__wpMpvLinked) q.style.display = 'inline-block';
+        }
         return 'ok';
       } catch (e) { return 'fail'; }
     };
@@ -706,6 +771,13 @@ object WebBridge {
     /** MPV ki asli timing page par (time line + icons + mini clock). */
     fun mpvTimeJs(t: Double, playing: Boolean, dur: Double, muted: Boolean): String =
         "window.__wpMpvTime ? window.__wpMpvTime($t, $playing, $dur, $muted) : 'fail'"
+
+    /** MPV ki chuni hui quality page ke select par dikhao. */
+    fun mpvQualityJs(h: Int): String = "window.__wpMpvQ ? window.__wpMpvQ($h) : 'fail'"
+
+    /** Slow net: "⏳ Buffering" overlay on/off. */
+    fun mpvBufJs(on: Boolean, pct: Int): String =
+        "window.__wpMpvBuf ? window.__wpMpvBuf($on, $pct) : 'fail'"
 
     /** Page ka snapshot maangne wali JS. */
     const val JS_SNAP: String = "window.__wpSnap ? window.__wpSnap() : ''"
