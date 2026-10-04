@@ -41,22 +41,18 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v117-test
-          name: Music Watch Party — v117 TEST (quality button + volume fix) [alag package: app.party.music.test]
+          name: "Music Watch Party — v117 TEST (quality + volume + sync fix)"
           body: |
-            **Music-WP-117-TEST.apk**
+            **Music-WP-117-TEST.apk** — ye ek ALAG package hai (app.party.music.test)
 
-            Apni MOJOODA "Music Watch Party" app ke upar install karo —
-            uninstall ki zaroorat NAHI. Chat / party data safe rehta hai
-            (same package app.party.music + same key).
+            Is liye ye aapki mojooda "Music Watch Party" ke SATH install hoga
+            (usay chhedta nahi). Pehle test karo, sab theek lage to phir
+            original package se asli update bana kar denge.
 
             Naya kya hai:
-            - Lock screen / background par gaana chalta hai (MPV engine)
-            - Lock/unlock par gaana wahin se chalta hai, restart nahi hota
-            - Auto-next lock me bhi chalta hai
-            - Lock ke baad gaana 1-2 second me shuru (fast start)
-            - App band karne par stream cache clear
-            - YouTube: pehle jaisa hi (video + lock screen)
-            - AV1/MKV files MPV par nahi bheji jati (crash nahi hota)
-
-            (v113 wale purane native libs ka test flop ho gaya tha - ab wapas naya MPV.)
+            - 🎚️ Quality button: player me 144p / 240p / 360p (slow net ke liye)
+            - 🔊 Volume fix: call ke baad media volume 0 par bhi aawaz aane wala bug
+            - 🔄 Sync fix: dost ki play/pause/seek ab aapke MPV par bhi
+            - 🌐 Slow net: bara cache (96MB) + "⏳ Buffering %" + khud recovery
+            - 🎬 YouTube poora MPV par (video + audio) + fullscreen + lock screen
           files: Music-WP-117-TEST.apk
