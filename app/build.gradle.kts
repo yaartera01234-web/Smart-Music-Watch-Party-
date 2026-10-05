@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music"      // Original app update, same package and signing key
         minSdk = 24
         targetSdk = 35
-        versionCode = 125                      // Keyboard GIF candidate; original package/signature
-        versionName = "117-GIF-TEST1"
+        versionCode = 125                      // Keyboard GIF update; original package/signature
+        versionName = "117-GIF-FIX"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }

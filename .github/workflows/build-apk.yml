@@ -1,8 +1,8 @@
-name: Build keyboard GIF TEST1 (original-package candidate)
+name: Build keyboard GIF FIX (original app update)
 
 on:
   push:
-    branches: [ fix/keyboard-gif-125 ]
+    branches: [ release/v117-mpv-final ]
   workflow_dispatch:
 
 permissions:
@@ -31,7 +31,7 @@ jobs:
           s=open('app/build.gradle.kts').read()
           assert re.search(r'applicationId\s*=\s*"app.party.music"',s)
           assert re.search(r'versionCode\s*=\s*125\b',s)
-          assert '117-GIF-TEST1' in s
+          assert '117-GIF-FIX' in s
           PY
       - name: Sync and keyboard routing simulations
         run: |
@@ -41,36 +41,37 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-117-GIF-TEST1.apk
-          ls -lh Music-Watch-Party-117-GIF-TEST1.apk
+          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-117-GIF-FIX.apk
+          ls -lh Music-Watch-Party-117-GIF-FIX.apk
       - name: Verify APK package, version and existing original signing certificate
         run: |
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)
           SIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
-          "$AAPT" dump badging Music-Watch-Party-117-GIF-TEST1.apk > /tmp/badging.txt
-          grep -F "package: name='app.party.music' versionCode='125' versionName='117-GIF-TEST1'" /tmp/badging.txt
-          "$SIGNER" verify --print-certs Music-Watch-Party-117-GIF-TEST1.apk > /tmp/signature.txt
+          "$AAPT" dump badging Music-Watch-Party-117-GIF-FIX.apk > /tmp/badging.txt
+          grep -F "package: name='app.party.music' versionCode='125' versionName='117-GIF-FIX'" /tmp/badging.txt
+          "$SIGNER" verify --print-certs Music-Watch-Party-117-GIF-FIX.apk > /tmp/signature.txt
           grep -F '842e2d5518d28a1d0c3aff8a16646cead9c58a619884a21a6a41792c04bffb33' /tmp/signature.txt
-          sha256sum Music-Watch-Party-117-GIF-TEST1.apk > SHA256SUMS.txt
+          sha256sum Music-Watch-Party-117-GIF-FIX.apk > SHA256SUMS.txt
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-Watch-Party-117-GIF-TEST1
+          name: Music-Watch-Party-117-GIF-FIX
           path: |
-            Music-Watch-Party-117-GIF-TEST1.apk
+            Music-Watch-Party-117-GIF-FIX.apk
             SHA256SUMS.txt
             app/build/reports/tests/testDebugUnitTest/
-      - name: Publish separate GIF test candidate (never replace stable)
-        if: github.ref == 'refs/heads/fix/keyboard-gif-125'
+      - name: Publish user-authorized original app update
+        if: github.ref == 'refs/heads/release/v117-mpv-final'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-gif-test1
+          tag_name: v117-gif-fix
           target_commitish: ${{ github.sha }}
-          prerelease: true
-          make_latest: false
-          name: 'Keyboard GIF TEST1 — original-package update candidate'
+          prerelease: false
+          make_latest: true
+          name: 'Music Watch Party v117 — Keyboard GIF FIX'
           body: |
-            Candidate only: handset keyboard send + peer receive still need testing.
+            Original-package update explicitly authorized by the user.
+            Handset keyboard send + peer receive still need confirmation.
             Original app.party.music, versionCode 125, same signing certificate.
             Installs over final 124 without uninstall. Stable 124 cannot be installed over
             125 as a normal downgrade; do not uninstall to roll back or risk local data.
@@ -88,5 +89,5 @@ jobs:
             primary returned HTTP412. This does not establish the handset's root cause.
             Local JVM/unit and routing simulations are not physical-device verification.
           files: |
-            Music-Watch-Party-117-GIF-TEST1.apk
+            Music-Watch-Party-117-GIF-FIX.apk
             SHA256SUMS.txt

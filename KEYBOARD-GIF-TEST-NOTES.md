@@ -1,3 +1,14 @@
+# Publication authorization update — 2026-10-05
+
+User explicitly requested original-app publication rather than a separate test release.
+VersionCode125 / versionName117-GIF-FIX / app.party.music; same signing configuration.
+Workflow now targets release/v117-mpv-final and publishes v117-gif-fix as latest stable,
+without overwriting historical v117-mpv-final APK/tag. Fresh authorization received;
+no earlier credential reused. Full CI/APK verification remains required before delivery.
+Handset keyboard send/peer receive remains pending; authorization is not a device test.
+
+The following is the historical local-candidate record before publication authorization:
+
 # Keyboard GIF TEST1 — local candidate, 2026-10-05
 
 ## Status
