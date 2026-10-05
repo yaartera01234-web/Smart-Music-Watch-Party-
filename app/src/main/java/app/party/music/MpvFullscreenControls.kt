@@ -52,6 +52,7 @@ internal class MpvFullscreenControls(
     private val seek=SeekBar(act)
     private val play=Button(act)
     private val tracks=Button(act)
+    private val aspect=Button(act)
     private val q=Button(act)
     private val hud=TextView(act)
     private val hideTask=Runnable { if(!player.isPaused()&&!dragging&&!dialogOpen)showControls(false) }
@@ -89,6 +90,7 @@ internal class MpvFullscreenControls(
         })
         val row=LinearLayout(act);row.gravity=Gravity.CENTER_VERTICAL
         time.textSize=12f;time.setTextColor(Color.WHITE);row.addView(time,LinearLayout.LayoutParams(0,-2,1f))
+        styleButton(aspect,"Aspect");aspect.contentDescription="Video aspect ratio";aspect.setOnClickListener{chooseAspect()};row.addView(aspect,LinearLayout.LayoutParams(dp(100),dp(42)))
         styleButton(tracks,"Audio");tracks.setOnClickListener{chooseAudio()};row.addView(tracks,LinearLayout.LayoutParams(dp(110),dp(42)))
         styleButton(q,"144p");q.setOnClickListener{chooseQuality()};row.addView(q,LinearLayout.LayoutParams(dp(85),dp(42)))
         bottom.addView(row)
@@ -114,6 +116,7 @@ internal class MpvFullscreenControls(
         if(!dragging){time.text="${clock(player.position())} / ${clock(player.duration())}";seek.progress=if(player.duration()>0)(player.position()/player.duration()*10000).toInt().coerceIn(0,10000) else 0}
         seek.isEnabled=player.duration()>0
         val count=player.audioTracks().size;tracks.text=if(count>1)"Audio · $count" else "Audio";tracks.isEnabled=count>0;tracks.alpha=if(count>0)1f else .4f
+        aspect.visibility=if(isAudio())GONE else VISIBLE
         q.visibility=if(isYoutube())VISIBLE else GONE;q.text="${quality()}p"
         art.visibility=if(isAudio()&&!player.hasArtwork())VISIBLE else GONE
         if(player.isPaused()&&!controlsVisible)wake()
@@ -126,6 +129,16 @@ internal class MpvFullscreenControls(
         val dialog=AlertDialog.Builder(act).setTitle("Audio language / track")
             .setSingleChoiceItems(labels,available.indexOfFirst{it.selected}){d,index->
                 player.selectAudio(available[index].id){ok->Toast.makeText(act,if(ok)"Audio: ${available[index].label}" else "Audio switch confirm nahi hua",Toast.LENGTH_SHORT).show();tick()};d.dismiss()
+            }.setNegativeButton("Close",null).create()
+        dialog.setOnDismissListener{dialogOpen=false;immerse();wake()};dialog.show()
+    }
+    private fun chooseAspect(){
+        dialogOpen=true;wake()
+        val dialog=AlertDialog.Builder(act).setTitle("Aspect ratio · this phone only")
+            .setSingleChoiceItems(player.aspectLabels.toTypedArray(),player.aspectIndex){d,i->
+                val ok=player.setAspect(i)
+                Toast.makeText(act,if(ok)player.aspectLabels[i] else "Aspect change failed",Toast.LENGTH_SHORT).show()
+                d.dismiss()
             }.setNegativeButton("Close",null).create()
         dialog.setOnDismissListener{dialogOpen=false;immerse();wake()};dialog.show()
     }

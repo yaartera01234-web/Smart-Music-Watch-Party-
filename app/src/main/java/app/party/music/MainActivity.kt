@@ -821,6 +821,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         resumed = false
+        try { mpvVideo.setSyncSpeed(1.0); web.evaluateJavascript("window.__wpSyncSuspend && window.__wpSyncSuspend()", null) } catch (_: Throwable) {}
         /* v111-FIX: jab tak page saamne/JS zinda hai, aakhri state cache kar lo.
            (lock ya Home ke baad WebView freeze ho jata hai — phir poochhna bekaar hai) */
         try { pollSnapshot() } catch (t: Throwable) {}
@@ -1300,6 +1301,7 @@ class MainActivity : Activity() {
             if (c == "fs:1") { enterYtFs(); return }
             if (c == "fs:0") { exitYtFs(); return }
             if (c.startsWith("quality:")) { c.substringAfter(':').toIntOrNull()?.let { switchYtQuality(it) }; return }
+            if (c.startsWith("speed:")) { c.substringAfter(':').toDoubleOrNull()?.let { mpvVideo.setSyncSpeed(it) }; return }
             if (ytVideoState != 2) return
             when {
                 c == "toggle" || c == "playpause" -> if (mpvVideo.isPaused()) mpvVideo.resume() else mpvVideo.pause()
@@ -1369,6 +1371,8 @@ class MainActivity : Activity() {
                     if (now >= mpvOnlySeekUntil || kotlin.math.abs(mpvVideo.position() - mpvOnlySeekTarget) < 1.0) {
                         val packet = org.json.JSONObject().put("id", ytVideoId).put("rev", mpvOnlyRevision)
                             .put("t", mpvVideo.position()).put("d", mpvVideo.duration())
+                            .put("raw",mpvVideo.rawPosition()).put("buffering",buf).put("speed",mpvVideo.syncSpeed())
+                            .put("ready",mpvVideo.loaded()).put("foreground",resumed && !CallForegroundService.running)
                             .put("playing", !mpvVideo.isPaused() && !mpvVideo.ended()).put("muted", mpvVideo.isMuted())
                             .put("ended", mpvVideo.ended()).put("art",mpvVideo.hasArtwork()).put("audioOnly",directMode && mpvVideo.actualHeight()==0 && mpvVideo.audioCodec().isNotBlank())
                         web.evaluateJavascript("window.__wpOnlyReport && window.__wpOnlyReport($packet)", null)

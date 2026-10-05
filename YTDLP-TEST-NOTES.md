@@ -33,3 +33,8 @@
 - Embedded MP3 art rendered by MPV when present; otherwise vinyl/gradient cover in inline and native fullscreen views.
 - Diagnostic line and YouTube fallback removed. Manual YouTube heights 144/240/360/480/720/1080, default 144, available choices filtered from extractor metadata. Direct files have no fake resolution dropdown.
 - Tests must distinguish browser mock/control tests and Linux MPV codec tests from handset-only brightness, system volume, fullscreen bars, codec support and real-party sync. No original-package final until user confirms.
+
+## TEST4 / Sync, cache and aspect — implementation pending Android build
+- Version 117-MPV-SYNC-TEST4, code 122; same isolated package.
+- See TEST4-NOTES.md for exact scope, MQTT adaptation differences, completed local tests,
+  and pending Android/real-tower/device release gates. TEST3 release is not overwritten.

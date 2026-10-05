@@ -21,7 +21,7 @@ internal object MpvOnlyWeb {
         return "allow"
     }
     fun response(context: Context, url: String): WebResourceResponse? = when (policy(url)) {
-        "adapter" -> WebResourceResponse("application/javascript", "UTF-8", context.assets.open("mpv-only.js"))
+        "adapter" -> WebResourceResponse("application/javascript", "UTF-8", ByteArrayInputStream(listOf("sync-policy.js", "sync-room.js", "mpv-only.js").joinToString("\n") { context.assets.open(it).bufferedReader().use { reader -> reader.readText() } }.toByteArray(Charsets.UTF_8)))
         "block" -> WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
         else -> null
     }

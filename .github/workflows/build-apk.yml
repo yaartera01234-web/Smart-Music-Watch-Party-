@@ -1,4 +1,4 @@
-name: Build v117 MPV suite TEST3 (separate package)
+name: Build v117 MPV sync TEST4 (separate package)
 
 on:
   push:
@@ -22,32 +22,37 @@ jobs:
           gradle-version: 8.11.1
       - name: Verify pinned extractor
         run: echo '1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6  app/src/main/res/raw/ytdlp' | sha256sum -c -
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Sync policy and simulated transport tests
+        run: node tests/sync-policy.cjs
       - name: Unit tests and separate-package APK
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-SUITE-TEST3.apk
-          ls -lh Music-WP-117-MPV-SUITE-TEST3.apk
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-SYNC-TEST4.apk
+          ls -lh Music-WP-117-MPV-SYNC-TEST4.apk
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-WP-117-MPV-SUITE-TEST3
+          name: Music-WP-117-MPV-SYNC-TEST4
           path: |
-            Music-WP-117-MPV-SUITE-TEST3.apk
+            Music-WP-117-MPV-SYNC-TEST4.apk
             app/build/reports/tests/testDebugUnitTest/
       - name: Publish isolated test APK (NOT original package)
         if: github.ref == 'refs/heads/test/v117-144-ytdlp'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-mpv-suite-test3
+          tag_name: v117-mpv-sync-test4
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
-          name: 'Music WP v117 — MPV suite TEST3 (separate app)'
+          name: 'Music WP v117 — MPV sync TEST4 (separate app)'
           body: |
             Test only. Updates the isolated Music WP 144 TEST app; original package stays untouched.
             Package: app.party.music.test144 · Label: Music WP 144 TEST
-            Version: 117-MPV-SUITE-TEST3 (internal versionCode 121)
+            Version: 117-MPV-SYNC-TEST4 (internal versionCode 122)
             Android 7+ · arm64-v8a.
 
             - On-device yt-dlp 2026.08.19 with Python + QuickJS; no external extraction server.
@@ -59,10 +64,15 @@ jobs:
             - Real MPV audio-track list and switching; only available tracks are offered.
             - Direct MP4/MKV/MP3/HLS use MPV, with no HTML media source. MP3 cover/fallback artwork.
             - Manual YouTube qualities through 1080p, filtered by source availability; default 144p.
-            - Existing Party protocol, chat, play/pause/seek and background service retained.
-            - Headless extraction/MPV checks passed; real Android and mixed-version Party tests still required.
+            - Normal-room Synkplay-inspired MQTT sync: 8s rewind, 1.5s slowdown, gentle nudge; no King.
+            - Versioned seek epochs, monotonic RTT compensation, stale-peer expiry and return anchoring.
+            - Fullscreen local aspect modes: Original, 16:9, 16:10, 4:3, 2.35:1, Pan & Scan.
+            - 100 MiB forward cache budget (50+50 for separate video/audio), 8 MiB backward; 24h read-ahead cap.
+            - Background/call clients are excluded from automatic drift correction; existing audio behavior retained.
+            - Both phones need TEST4 for automatic correction. Old clients keep explicit controls only.
+            - See TEST4-NOTES.md for test scope and remaining device/real-broker gates.
 
             Test fullscreen system bars, gestures, actual multi-audio MKV switching, MP3 cover,
             pause/resume, seek, quality switches, Party sync and lock/unlock on your phone.
             No original-package final build is included.
-          files: Music-WP-117-MPV-SUITE-TEST3.apk
+          files: Music-WP-117-MPV-SYNC-TEST4.apk

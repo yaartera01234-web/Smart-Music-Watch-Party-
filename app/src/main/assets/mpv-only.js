@@ -1,10 +1,11 @@
-/* TEST2: local YouTube API-compatible controller. No iframe, fetch or media URL. */
+/* TEST4: local YouTube API-compatible controller. No iframe, fetch or media URL. */
 (function () {
   'use strict';
   if (window.__wpMpvOnly) return;
   window.__wpMpvOnly = true;
   var player, readyCallback, notified=false, incomingState=null;
   var s={type:'youtube',title:'',id:'',t:0,d:0,playing:false,muted:false,ended:false,rev:0,quality:144,qualities:[144,240,360,480,720,1080]};
+  var reportAt=-100000, raw=0, actualRate=1, buffering=false, foreground=false, mediaReady=false, roomSync=null, roomContext='';
   function native(name,args){try{if(window.YaarNative&&typeof window.YaarNative[name]==='function')window.YaarNative[name].apply(window.YaarNative,args);}catch(e){}}
   function refresh(){try{if(typeof updatePremiumVideoUI==='function')updatePremiumVideoUI();}catch(e){}}
   function command(c){s.rev++;native('mpvOnlyCommand',[c,s.rev]);refresh();}
@@ -17,6 +18,7 @@
   Player.prototype.loadVideoById=function(value,start){
     var id=typeof value==='string'?value:value&&value.videoId;
     if(!/^[A-Za-z0-9_-]{11}$/.test(id||''))return;
+    reportAt=-100000;mediaReady=false;if(roomSync)roomSync.barrier(true);
     s.type='youtube';s.title=id;s.id=id;s.t=Math.max(0,Number(incomingState?incomingState.time:((value&&value.startSeconds)||start))||0);s.d=0;s.playing=incomingState?!!incomingState.playing:true;s.ended=false;s.rev++;
     native('mpvOnlyLoad',[id,s.t,s.playing,s.rev]);refresh();
   };
@@ -44,7 +46,9 @@
   window.YT={Player:Player,PlayerState:{UNSTARTED:-1,ENDED:0,PLAYING:1,PAUSED:2,BUFFERING:3,CUED:5}};
   window.__wpOnlyReport=function(r){
     if(!r||r.id!==s.id||r.rev<s.rev)return false;
-    s.t=Math.max(0,Number(r.t)||0);s.d=Math.max(0,Number(r.d)||0);s.playing=!!r.playing;s.muted=!!r.muted;
+    reportAt=performance.now()/1000;raw=Number.isFinite(r.raw)?r.raw:r.t;buffering=!!r.buffering;foreground=r.foreground===true;mediaReady=r.ready===true;
+    if(Number.isFinite(r.speed)){actualRate=r.speed;if(roomSync&&foreground&&mediaReady&&Math.abs(actualRate-roomSync.speed)>.00001)native('mpvCmd',['speed:'+roomSync.speed]);}
+    s.t=Math.max(0,Number(r.t)||0);s.d=Math.max(0,Number(r.d)||0);try{lastYtTime=s.t;}catch(e){}s.playing=!!r.playing;s.muted=!!r.muted;
     var ended=!!r.ended;
     if(ended&&!s.ended){s.ended=true;s.playing=false;if(s.type==='youtube'){var fn=player&&player.config.events&&player.config.events.onStateChange;if(fn)fn({target:player,data:0});}else{mp4.dispatchEvent(new Event('ended'));}}
     var art=document.getElementById('wp-audio-cover');if(art)art.style.display=s.type!=='youtube'&&(s.type==='mp3'||r.audioOnly)&&!r.art?'grid':'none';
@@ -74,6 +78,7 @@
       }
       if(!/^https?:\/\//i.test(data.url||'')){toast('MPV ko direct HTTP/HTTPS media link chahiye');return;}
       if(!['mp4','mp3','hls'].includes(data.type)){data=Object.assign({},data,{type:/\.(mp3|m4a|aac|flac|wav|ogg)(?:[?#]|$)/i.test(data.url)?'mp3':/\.m3u8(?:[?#]|$)/i.test(data.url)?'hls':'mp4'});}
+      reportAt=-100000;mediaReady=false;if(roomSync)roomSync.barrier(true);
       destroyHLS();currentType=data.type;s.type=data.type;s.id=data.url;s.title=data.title||data.label||makeLabel(data);
       s.t=Math.max(0,Number(incomingState&&incomingState.time)||0);s.d=0;s.playing=!!autoplay;s.ended=false;s.rev++;
       hlsAudioMode=false;noVideo.classList.add('hidden');mp3Player.classList.add('hidden');mp4.classList.add('hidden');ytDiv.classList.add('hidden');
@@ -113,6 +118,7 @@
     window.__wpMpvFsToggle=function(){return window.__wpMpvFsSet(!window.__wpMpvFsOn);};
     var originalApply=window.applyState;
     window.applyState=function(state){
+      if(roomSync)roomSync.barrier(true);
       if(!state||!['youtube','mp4','mp3','hls'].includes(state.type))return originalApply.apply(this,arguments);
       if(state.type!=='youtube'){suppressMP4=true;syncQuiet=Date.now()+1800;if(s.id!==state.url||s.type!==state.type){incomingState=state;try{loadVideoLocal(state,!!state.playing);}finally{incomingState=null;}}else{mp4.currentTime=Math.max(0,Number(state.time)||0);if(state.playing)mp4.play();else mp4.pause();}setTimeout(function(){suppressMP4=false;},1800);return;}
       // Apply authoritative Party state atomically. Never reload an already-playing
@@ -145,6 +151,52 @@
     window.__wpSetMute=function(){return 'mpv-only-no-iframe';};
     window.__wpPausePage=function(){window.__wpOnlySuspend();return 'ok';};
     var fs=document.getElementById('premium-video-fullscreen');if(fs)fs.onclick=function(){window.__wpMpvFsToggle();};
+    // New clients add native-clock drift correction; old clients keep explicit commands.
+    function mediaKey(){return s.type+':'+s.id;}
+    function syncRoom(){
+      var context=typeof ROOM==='string'?ROOM+'|'+myId:'';
+      if(!joined||!mqttUp||!context){if(roomSync)roomSync.suspend();roomSync=null;roomContext='';return null;}
+      if(!roomSync||roomContext!==context){
+        if(roomSync)roomSync.suspend();roomContext=context;
+        roomSync=new WPSyncRoom({id:function(){return myId;},now:function(){return performance.now()/1000;},
+          send:function(m){pub(TP.cmd,{action:'wp-sync4',from:myId,rid:mid(),payload:m},false);},
+          sample:function(){var age=performance.now()/1000-reportAt;return {media:mediaKey(),age:age,
+            pos:raw+(s.playing&&!buffering?Math.max(0,age)*actualRate:0),
+            playing:s.playing,buffering:buffering,rate:actualRate,ready:foreground&&mediaReady&&!s.ended};},
+          apply:function(result){
+            native('mpvCmd',['speed:'+result.speed]);
+            if(result.seek!==null){
+              suppressYT=true;suppressMP4=true;syncQuiet=Date.now()+3000;
+              var target=Math.max(0,Math.min(s.d>0?s.d-.05:Infinity,result.seek));
+              player.seekTo(target);lastYtTime=target;reportAt=-100000;
+              if(typeof result.playing==='boolean'){if(result.playing)player.playVideo();else player.pauseVideo();}
+              setTimeout(function(){suppressYT=false;suppressMP4=false;},2500);
+            }
+          }});
+      }return roomSync;
+    }
+    window.premiumSeekBy=function(delta){__wpUnifiedCommand('seekrel:'+delta);};
+    var basePubCmd=window.pubCmd,baseApplyCmd=window.applyCmd;
+    var playbackActions=['load','play','pause','seek','sync'];
+    window.pubCmd=function(action,extra){
+      var room=syncRoom();
+      if(room&&playbackActions.includes(action))extra=Object.assign({},extra,{_wp4:{epoch:room.localCommand(),media:mediaKey()}});
+      return basePubCmd(action,extra);
+    };
+    window.applyCmd=function(c){
+      if(!c)return;var room=syncRoom();
+      if(c.action==='wp-sync4'){if(room)room.receive(c.from,c.payload);return;}
+      if(room&&playbackActions.includes(c.action)){
+        if(c._wp4){
+          if(c.action!=='load'&&c._wp4.media!==mediaKey())return;
+          if(!room.remoteCommand(c._wp4.epoch))return;
+        }else room.barrier(false); // Legacy explicit command is still supported.
+      }
+      return baseApplyCmd(c);
+    };
+    window.__wpSyncSuspend=function(){foreground=false;if(roomSync)roomSync.suspend();};
+    window.__wpSyncTick=function(){var room=syncRoom();if(room)room.tick();};
+    setInterval(window.__wpSyncTick,1000);
     updateYouTubeQualityOptions();
     return 'mpv-only-ready';
   };

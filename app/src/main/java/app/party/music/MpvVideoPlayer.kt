@@ -85,6 +85,7 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
             try {
                 val v = view ?: return@post
                 if (v.mpv == null) { localError = "core tayyar nahi"; return@post }
+                setSyncSpeed(1.0)
                 currentSource = url
                 dispPos = -1.0
                 localError = null
@@ -94,7 +95,10 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
                 // during loadfile, not via a racing audio-add after video has started.
                 fun quoted(value: String) = "%${value.toByteArray(Charsets.UTF_8).size}%$value"
                 val options = mutableListOf("start=${if (pos.isFinite()) pos.coerceAtLeast(0.0) else 0.0}",
-                    "user-agent=" + quoted(userAgent), "audio-files-clr=")
+                    "user-agent=" + quoted(userAgent), "audio-files-clr=",
+                    // Separate YouTube audio is a second demuxer: split the budget.
+                    "demuxer-max-bytes=${(if (audioUrl.isNullOrBlank()) 100L else 50L) * 1024 * 1024}",
+                    "demuxer-max-back-bytes=${(if (audioUrl.isNullOrBlank()) 8L else 4L) * 1024 * 1024}")
                 AudioTrackMemory.get(url)?.let { options += "aid=$it" }
                 if (!audioUrl.isNullOrBlank()) options += "audio-files-append=" + quoted(audioUrl)
                 if (!referer.isNullOrBlank()) options += "http-header-fields-append=" + quoted("Referer: $referer")
@@ -176,6 +180,28 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
         }
     }
 
+    // Device-local display choice. Never published as Party playback state.
+    val aspectLabels = listOf("Original", "16:9", "16:10", "4:3", "2.35:1", "Pan & Scan")
+    var aspectIndex = 0
+        private set
+    fun setAspect(index: Int): Boolean {
+        if (index !in aspectLabels.indices) return false
+        val mpv = view?.mpv ?: return false
+        return try {
+            val ratio = listOf("-1", "1.777778", "1.600000", "1.333333", "2.350000", "-1")[index]
+            mpv.setString("video-aspect-override", ratio).getOrThrow()
+            mpv.setString("panscan", if (index == 5) "1" else "0").getOrThrow()
+            aspectIndex = index
+            true
+        } catch (_: Throwable) { false }
+    }
+    fun setSyncSpeed(rate: Double) {
+        if (rate !in listOf(0.95, 0.995, 1.0, 1.005)) return
+        try { view?.mpv?.setString("speed", rate.toString())?.getOrThrow() } catch (_: Throwable) {}
+    }
+    fun syncSpeed(): Double = try { view?.mpv?.get(MpvProperties.Speed)?.getOrNull() ?: 1.0 } catch (_: Throwable) { 1.0 }
+    fun rawPosition(): Double = try { view?.timePos?.takeIf { it.isFinite() && it >= 0 } ?: 0.0 } catch (_: Throwable) { 0.0 }
+
     fun setFullscreen(on: Boolean) {
         fullscreen = on
         if(on) view?.layoutParams = FrameLayout.LayoutParams(-1, -1)
@@ -212,18 +238,16 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
         }
     }
 
-    /* SLOW NET: bara cache + network timeouts + reconnect.
-       - demuxer cache: 96MB aage + 24MB peeche (360p par ~20+ minute buffer)
-       - readahead 300s: jitna net deta hai, utna aage bharta rahe (ruke nahi)
-       - network-timeout 30s + lavf reconnect: stream toote to khud jude
-       - cache-pause-wait 2s: cache khali ho to 2s ruk kar bhare, phir chale (kam stop-start) */
+    // Active foreground core: 100 MiB forward / 8 MiB backward packet cache.
+    // 24h read-ahead lets short finite songs reach EOF; byte cap still bounds cache.
+    // This is not a whole-process RAM cap, nor a download-completion guarantee.
     private fun slowNetOptions(): MpvOptions = MpvOptions(
-        demuxerMaxBytes = 96L * 1024 * 1024,
+        demuxerMaxBytes = 100L * 1024 * 1024,
         extra = mapOf(
-            "demuxer-max-back-bytes" to (24L * 1024 * 1024).toString(),
-            "demuxer-readahead-secs" to "300",
+            "demuxer-max-back-bytes" to (8L * 1024 * 1024).toString(),
+            "demuxer-readahead-secs" to "86400",
             "cache" to "yes",
-            "cache-secs" to "300",
+            "cache-secs" to "86400",
             "cache-pause-wait" to "2",
             "network-timeout" to "30",
             "stream-lavf-o" to "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5"
