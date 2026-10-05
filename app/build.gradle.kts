@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music.test144"  // ⚠️ TEST BUILD — alag package (side-by-side install, original app chhua nahi jayega)
         minSdk = 24
         targetSdk = 35
-        versionCode = 122                      // isolated sync/aspect TEST4
-        versionName = "117-MPV-SYNC-TEST4"
+        versionCode = 123                      // isolated sync/aspect TEST4
+        versionName = "117-MPV-FULLSCREEN-TEST5"
         manifestPlaceholders["appLabel"] = "Music WP 144 TEST"   // asli app se pehchaan ke liye
         ndk { abiFilters += listOf("arm64-v8a") }
     }

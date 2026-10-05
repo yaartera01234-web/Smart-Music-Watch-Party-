@@ -37,6 +37,7 @@ internal class MpvFullscreenControls(
     private val oldOrientation=act.requestedOrientation
     private val oldFlags=act.window.decorView.systemUiVisibility
     private val oldWindowFlags=act.window.attributes.flags
+    private val oldCutoutMode=if(Build.VERSION.SDK_INT>=28)act.window.attributes.layoutInDisplayCutoutMode else 0
     private var oldBehavior=0
     private var controlsVisible=true
     private var dragging=false
@@ -99,6 +100,15 @@ internal class MpvFullscreenControls(
         act.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_FULLSCREEN)
         if(Build.VERSION.SDK_INT>=30)oldBehavior=act.window.insetsController?.systemBarsBehavior?:0
         act.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Insets protect only controls. Never inset the MPV surface or whole overlay:
+        // doing that leaves a black strip beside landscape camera cutouts.
+        setOnApplyWindowInsetsListener { _, insets ->
+            val cutout=if(Build.VERSION.SDK_INT>=28)insets.displayCutout else null
+            val left=cutout?.safeInsetLeft?:0;val right=cutout?.safeInsetRight?:0
+            top.setPadding(dp(18)+left,dp(8),dp(18)+right,dp(8))
+            bottom.setPadding(dp(26)+left,dp(12),dp(26)+right,dp(12))
+            insets
+        }
         immerse();tick();wake()
     }
     private fun rounded(color:Int,radius:Float)=GradientDrawable().apply{setColor(color);cornerRadius=dp(radius.toInt()).toFloat()}
@@ -106,7 +116,18 @@ internal class MpvFullscreenControls(
     private fun button(label:String,description:String,action:()->Unit)=Button(act).apply{styleButton(this,label);contentDescription=description;setOnClickListener{action()}}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).roundToInt()
     private fun clock(t:Double):String{val n=t.coerceAtLeast(0.0).toInt();return if(n>=3600)"${n/3600}:${(n/60%60).toString().padStart(2,'0')}:${(n%60).toString().padStart(2,'0')}" else "${n/60}:${(n%60).toString().padStart(2,'0')}"}
+    override fun onAttachedToWindow(){super.onAttachedToWindow();requestApplyInsets()}
     fun immerse(){
+        // MainActivity uses the platform's fitted-window default outside this overlay.
+        // Hiding bars alone does not opt into the landscape notch area on API 28+.
+        if(Build.VERSION.SDK_INT>=28){
+            act.window.attributes=act.window.attributes.apply{
+                layoutInDisplayCutoutMode=if(Build.VERSION.SDK_INT>=30)
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        if(Build.VERSION.SDK_INT>=30)act.window.setDecorFitsSystemWindows(false)
         if(Build.VERSION.SDK_INT>=30){act.window.insetsController?.apply{systemBarsBehavior=WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;hide(WindowInsets.Type.systemBars())}}
         else act.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
     }
@@ -183,6 +204,9 @@ internal class MpvFullscreenControls(
     fun release(){
         handler.removeCallbacksAndMessages(null)
         act.window.attributes=act.window.attributes.apply{screenBrightness=oldBrightness}
+        if(Build.VERSION.SDK_INT>=28)act.window.attributes=act.window.attributes.apply{layoutInDisplayCutoutMode=oldCutoutMode}
+        if(Build.VERSION.SDK_INT>=30)act.window.setDecorFitsSystemWindows(true)
+        setOnApplyWindowInsetsListener(null)
         act.requestedOrientation=oldOrientation
         act.window.setFlags(oldWindowFlags,WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if(Build.VERSION.SDK_INT>=30)act.window.insetsController?.apply{systemBarsBehavior=oldBehavior;show(WindowInsets.Type.systemBars())}

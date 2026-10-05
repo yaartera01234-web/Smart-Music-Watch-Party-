@@ -1,4 +1,4 @@
-name: Build v117 MPV sync TEST4 (separate package)
+name: Build v117 MPV fullscreen TEST5 (separate package)
 
 on:
   push:
@@ -31,28 +31,28 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-SYNC-TEST4.apk
-          ls -lh Music-WP-117-MPV-SYNC-TEST4.apk
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-FULLSCREEN-TEST5.apk
+          ls -lh Music-WP-117-MPV-FULLSCREEN-TEST5.apk
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-WP-117-MPV-SYNC-TEST4
+          name: Music-WP-117-MPV-FULLSCREEN-TEST5
           path: |
-            Music-WP-117-MPV-SYNC-TEST4.apk
+            Music-WP-117-MPV-FULLSCREEN-TEST5.apk
             app/build/reports/tests/testDebugUnitTest/
       - name: Publish isolated test APK (NOT original package)
         if: github.ref == 'refs/heads/test/v117-144-ytdlp'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-mpv-sync-test4
+          tag_name: v117-mpv-fullscreen-test5
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
-          name: 'Music WP v117 — MPV sync TEST4 (separate app)'
+          name: 'Music WP v117 — MPV fullscreen TEST5 (separate app)'
           body: |
             Test only. Updates the isolated Music WP 144 TEST app; original package stays untouched.
             Package: app.party.music.test144 · Label: Music WP 144 TEST
-            Version: 117-MPV-SYNC-TEST4 (internal versionCode 122)
+            Version: 117-MPV-FULLSCREEN-TEST5 (internal versionCode 123)
             Android 7+ · arm64-v8a.
 
             - On-device yt-dlp 2026.08.19 with Python + QuickJS; no external extraction server.
@@ -70,9 +70,11 @@ jobs:
             - 100 MiB forward cache budget (50+50 for separate video/audio), 8 MiB backward; 24h read-ahead cap.
             - Background/call clients are excluded from automatic drift correction; existing audio behavior retained.
             - Both phones need TEST4 for automatic correction. Old clients keep explicit controls only.
-            - See TEST4-NOTES.md for test scope and remaining device/real-broker gates.
+            - TEST5: fullscreen draws into landscape display-cutout area; only controls receive notch-safe padding.
+            - Fullscreen exit restores the prior cutout mode and normal fitted-window layout.
+            - Sync policy unchanged from TEST4. See TEST5-NOTES.md for verification limits.
 
             Test fullscreen system bars, gestures, actual multi-audio MKV switching, MP3 cover,
             pause/resume, seek, quality switches, Party sync and lock/unlock on your phone.
             No original-package final build is included.
-          files: Music-WP-117-MPV-SYNC-TEST4.apk
+          files: Music-WP-117-MPV-FULLSCREEN-TEST5.apk
