@@ -24,7 +24,7 @@ for(let type of ['mp4','mp3','hls']){
 }
 await a.evaluate(()=>{loadVideoLocal({type:'mp4',url:'https://fixtures.local/two-tracks.mkv'},true);__wpOnlyReport(fake)});
 assert.equal(await a.evaluate(()=>calls[calls.length-1][0]),'direct');
-assert(!requests.some(u=>u.startsWith('https://fixtures.local/')));console.log('PASS MKV routed natively; zero duplicate browser media downloads');
+assert(!requests.some(u=>u.startsWith('https://fixtures.local/')));console.log('PASS MKV routed natively; zero duplicate browser media downloads');await a.evaluate(()=>loadVideoLocal({type:'direct',url:'https://fixtures.local/lockscreen-song.mp3'},true));assert.equal(await a.evaluate(()=>JSON.parse(__wpSnap()).t),'mp3');await a.evaluate(()=>{__wpResumeAt(25,false,null);__wpOnlyReport(fake)});assert.equal(await a.evaluate(()=>fake.t),25);assert.equal(await a.evaluate(()=>fake.playing),false);console.log('PASS service direct-item handback normalized to MP3; position/paused state preserved');
 await a.evaluate(()=>{loadVideoLocal({type:'youtube',videoId:'baYbQ4OOGM4'},true);__wpOnlyQualities([144,240,360,480,720,1080]);__wpMpvQ(144)});
 assert.deepEqual(await a.locator('#premium-video-quality option').evaluateAll(es=>es.map(e=>e.value)),['144','240','360','480','720','1080']);
 await a.evaluate(()=>__wpOnlyQualities([144,360,720]));assert.deepEqual(await a.locator('#premium-video-quality option').evaluateAll(es=>es.map(e=>e.value)),['144','360','720']);console.log('PASS six manual qualities; absent source qualities filtered, no Auto');

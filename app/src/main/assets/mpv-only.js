@@ -73,6 +73,7 @@
         return oldLoad.apply(this,arguments);
       }
       if(!/^https?:\/\//i.test(data.url||'')){toast('MPV ko direct HTTP/HTTPS media link chahiye');return;}
+      if(!['mp4','mp3','hls'].includes(data.type)){data=Object.assign({},data,{type:/\.(mp3|m4a|aac|flac|wav|ogg)(?:[?#]|$)/i.test(data.url)?'mp3':/\.m3u8(?:[?#]|$)/i.test(data.url)?'hls':'mp4'});}
       destroyHLS();currentType=data.type;s.type=data.type;s.id=data.url;s.title=data.title||data.label||makeLabel(data);
       s.t=Math.max(0,Number(incomingState&&incomingState.time)||0);s.d=0;s.playing=!!autoplay;s.ended=false;s.rev++;
       hlsAudioMode=false;noVideo.classList.add('hidden');mp3Player.classList.add('hidden');mp4.classList.add('hidden');ytDiv.classList.add('hidden');
