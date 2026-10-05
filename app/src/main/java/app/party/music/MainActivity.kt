@@ -128,6 +128,7 @@ class MainActivity : Activity() {
     private var mediaTitle = "Watch Party"
     private var availableQualities = listOf(144,240,360,480,720,1080)
     private var fullscreenControls: MpvFullscreenControls? = null
+    private var webAccessibilityBeforeFs = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
     private var mpvOnlyMuted = false
     private var mpvOnlyRevision = 0
     private var mpvOnlySeekUntil = 0L
@@ -1259,7 +1260,9 @@ class MainActivity : Activity() {
         ytFsOn=true
         mpvVideo.setFullscreen(true)
         try { (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(web.windowToken,0) } catch (_: Throwable) {}
-        web.visibility=View.INVISIBLE
+        webAccessibilityBeforeFs=web.importantForAccessibility
+        web.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        web.alpha=0f // Keep JS/Party state active while native fullscreen covers the page.
         val controls=MpvFullscreenControls(this,mpvVideo,
             send={cmd->if(cmd.startsWith("quality:"))handleMpvCommand(cmd) else web.evaluateJavascript("window.__wpUnifiedCommand && window.__wpUnifiedCommand(${org.json.JSONObject.quote(cmd)})",null)},
             exit={exitYtFs()},sourceTitle={mediaTitle},isYoutube={!directMode},isAudio={directMode&&(directKind=="mp3" || (mpvVideo.actualHeight()==0 && mpvVideo.audioCodec().isNotBlank()))},
@@ -1270,7 +1273,7 @@ class MainActivity : Activity() {
         if(!ytFsOn)return
         ytFsOn=false
         fullscreenControls?.let { it.release();root.removeView(it) };fullscreenControls=null
-        mpvVideo.setFullscreen(false);web.visibility=View.VISIBLE
+        mpvVideo.setFullscreen(false);web.alpha=1f;web.importantForAccessibility=webAccessibilityBeforeFs
         web.evaluateJavascript("window.__wpMpvFsOn=false",null)
         for(delay in longArrayOf(50,250,600))handoffHandler.postDelayed({updateYtRect()},delay)
     }

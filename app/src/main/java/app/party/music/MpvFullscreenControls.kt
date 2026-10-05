@@ -151,11 +151,16 @@ internal class MpvFullscreenControls(
     }
     override fun onTouchEvent(e:MotionEvent):Boolean{
         when(e.actionMasked){
-            MotionEvent.ACTION_MOVE->if(gesturing){
+            MotionEvent.ACTION_MOVE->{
+                // Blank-area DOWN is handled by this ViewGroup itself; Android may
+                // skip onInterceptTouchEvent for later MOVE events in that case.
+                if(canGesture && abs(e.y-downY)>dp(12) && abs(e.y-downY)>abs(e.x-downX)*1.3f)gesturing=true
+                if(gesturing){
                 val change=(downY-e.y)/height.coerceAtLeast(1)*1.5f
                 if(zone==1){val value=(startBrightness+change).coerceIn(.03f,1f);act.window.attributes=act.window.attributes.apply{screenBrightness=value};hud.text="☀  Brightness ${(value*100).roundToInt()}%"}
-                else{val max=audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);val value=(startVolume+change*max).roundToInt().coerceIn(0,max);audio.setStreamVolume(AudioManager.STREAM_MUSIC,value,0);hud.text="♪  Volume $value / $max"}
+                else{val max=audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);val value=(startVolume+change*max).roundToInt().coerceIn(0,max);try{audio.setStreamVolume(AudioManager.STREAM_MUSIC,value,0)}catch(_:SecurityException){};hud.text="♪  Volume ${audio.getStreamVolume(AudioManager.STREAM_MUSIC)} / $max"}
                 hud.visibility=VISIBLE;handler.removeCallbacks(hideTask)
+                }
             }
             MotionEvent.ACTION_UP->{if(gesturing){hud.visibility=GONE;wake()}else if(controlsVisible)showControls(false)else wake();gesturing=false;performClick()}
             MotionEvent.ACTION_CANCEL->{gesturing=false;hud.visibility=GONE;wake()}
