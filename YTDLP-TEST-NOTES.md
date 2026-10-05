@@ -12,3 +12,14 @@
 - 240/360 selector, original queue/Party protocol preserved. No live HTML changes.
 - Separate streams are attached atomically in MPV loadfile options (no audio-add race).
 - Device tests required: provided video, audible sound, pause/resume/seek, mixed-version party, quality switching, lock/unlock.
+
+## TEST2 / MPV-only
+- Same isolated package app.party.music.test144; versionName 117-MPV-ONLY-TEST2, code 120. Updates TEST1 only.
+- Locally substitutes the iframe API with assets/mpv-only.js; no actual YouTube iframe exists.
+- Foreground + notification WebViews block YouTube player/embed/googlevideo requests; metadata/thumbnails remain allowed. Native yt-dlp and MPV use their own network stack.
+- Existing page controls/Party functions call the adapter. MPV timing is authoritative; native EOF triggers the existing queue end handler once.
+- Revision tags reject stale native ticks after seeks/track changes. Polling no longer drives a second player or resends commands to MPV.
+- Failed playback offers retry or explicitly opening YouTube externally (not silently in WebView).
+- Video handback resolves video+audio rather than passing the background audio-only URL to a video surface. May have a reload gap; device lock/unlock test required.
+- Browser test: tests/mpv-only-browser.cjs with Playwright installed and WP_HTML pointing to the production HTML. Native player and transport are mocked; real page functions exercised. Not a real-device or real-broker test.
+- Phone tests required before an original-package build: controls, 144/240/360, mixed-version Party, queue next, lock/unlock and network/data observations.

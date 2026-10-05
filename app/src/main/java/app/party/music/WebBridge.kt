@@ -677,6 +677,7 @@ object WebBridge {
     /* ---- 16d) MPV ki chuni hui quality select par dikhao ---- */
     window.__wpMpvQ = function (sel) {
       try {
+        if(window.__wpOnlyQuality)window.__wpOnlyQuality(sel);
         window.__wpMpvQVal = sel;
         var q = document.getElementById('premium-video-quality');
         if (q) {

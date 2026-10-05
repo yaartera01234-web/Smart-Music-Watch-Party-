@@ -145,6 +145,8 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
     /** Pehla frame aa gaya? (timePos null hota hai jab tak video shuru na ho) */
     fun hasFrame(): Boolean = try { view != null && view?.mpv != null && view?.timePos != null && actualHeight() > 0 } catch (t: Throwable) { false }
 
+    fun ended(): Boolean = try { view?.mpv?.get(MpvProperties.EofReached)?.getOrNull() == true } catch (_: Throwable) { false }
+
     fun actualHeight(): Int = try { view?.mpv?.get(MpvProperties.Height)?.getOrNull()?.toInt() ?: 0 } catch (_: Throwable) { 0 }
     fun audioCodec(): String = try { view?.mpv?.get(MpvProperties.AudioCodecName)?.getOrNull().orEmpty() } catch (_: Throwable) { "" }
 
@@ -167,7 +169,7 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
         }
     }
 
-    fun stop() { main.post { try { view?.paused = true } catch (t: Throwable) {} } }
+    fun stop() { main.post { try { view?.mpv?.command("stop"); dispPos = -1.0 } catch (t: Throwable) {} } }
 
     fun destroy() {
         main.post {

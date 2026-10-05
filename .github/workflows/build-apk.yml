@@ -1,4 +1,4 @@
-name: Build v117 144p yt-dlp TEST (separate package)
+name: Build v117 MPV-only TEST2 (separate package)
 
 on:
   push:
@@ -26,31 +26,33 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-144-YTDLP-TEST1.apk
-          ls -lh Music-WP-117-144-YTDLP-TEST1.apk
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-ONLY-TEST2.apk
+          ls -lh Music-WP-117-MPV-ONLY-TEST2.apk
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-WP-117-144-YTDLP-TEST1
+          name: Music-WP-117-MPV-ONLY-TEST2
           path: |
-            Music-WP-117-144-YTDLP-TEST1.apk
+            Music-WP-117-MPV-ONLY-TEST2.apk
             app/build/reports/tests/testDebugUnitTest/
       - name: Publish isolated test APK (NOT original package)
         if: github.ref == 'refs/heads/test/v117-144-ytdlp'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-144-ytdlp-test1
+          tag_name: v117-mpv-only-test2
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
-          name: 'Music WP v117 — 144p yt-dlp TEST1 (separate app)'
+          name: 'Music WP v117 — MPV-only TEST2 (separate app)'
           body: |
             Test only. Original app and existing TEST2 are NOT replaced.
             Package: app.party.music.test144 · Label: Music WP 144 TEST
-            Version: 117-144-YTDLP-TEST1 (internal versionCode 119)
+            Version: 117-MPV-ONLY-TEST2 (internal versionCode 120)
             Android 7+ · arm64-v8a.
 
             - On-device yt-dlp 2026.08.19 with Python + QuickJS; no external extraction server.
+            - YouTube iframe/API/media blocked in foreground and background WebViews; local API adapter routes controls to MPV.
+            - Retry or explicit Open YouTube external fallback; no silent iframe playback.
             - Default exact 144p plus audio. No silently relabeled 360p fallback.
             - MPV receives video and audio atomically at load time.
             - Test badge reports actual MPV video height and audio codec.
@@ -60,4 +62,4 @@ jobs:
             Use the supplied YouTube link, confirm `MPV actual 144p · aac` and audible sound,
             then test pause/resume, seek, quality switches and Party sync.
             No original-package final build is included.
-          files: Music-WP-117-144-YTDLP-TEST1.apk
+          files: Music-WP-117-MPV-ONLY-TEST2.apk
