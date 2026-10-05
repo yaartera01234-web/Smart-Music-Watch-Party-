@@ -1,3 +1,16 @@
+# Silent fallback update — local preparation
+
+User requested no popup, Retry button or intermediate fallback status:
+original Litterbox once, then tmpfiles once automatically; only final failure is shown.
+Backup public/unencrypted one-hour retention unchanged and previously explained.
+Original app.party.music, versionCode126 / versionName117-GIF-AUTO.
+Prepared workflow publishes v117-gif-auto on the original release branch.
+Fresh GitHub build/push access required; no old token reused. No126 APK built yet.
+Local:12 routing simulations,21 sync simulations,5 source guardrails passed.
+These are not Android CI or phone tests. MPV/sync/HTML untouched.
+
+Historical previous-release records follow:
+
 # Publication authorization update — 2026-10-05
 
 User explicitly requested original-app publication rather than a separate test release.

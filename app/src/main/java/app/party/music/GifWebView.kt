@@ -1,7 +1,6 @@
 package app.party.music
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.os.Build
 import android.view.inputmethod.EditorInfo
@@ -18,7 +17,6 @@ class GifWebView(context: Context) : WebView(context) {
     var onGif: ((String, String) -> Unit)? = null
     var onGifError: ((String) -> Unit)? = null
     private val busy = AtomicBoolean(false)
-    private var backupDialog: AlertDialog? = null
 
     companion object {
         // Mirrors wpSendGif routing, but requires an active conversation. Include a page nonce
@@ -101,7 +99,7 @@ class GifWebView(context: Context) : WebView(context) {
         }
     }
 
-    /** Runs on the worker. No automatic duplicate POST/retry; original-host retry is explicit. */
+    /** Original host once, then backup once. No popup or intermediate status. */
     private fun upload(bytes: ByteArray, format: KeyboardGifUpload.Format, target: String, backup: Boolean) {
         try {
             val link=if(backup) KeyboardGifUpload.backup(bytes,format) else KeyboardGifUpload.primary(bytes,format)
@@ -110,47 +108,17 @@ class GifWebView(context: Context) : WebView(context) {
                 finish()
             }
         } catch(e: Exception) {
-            val reason=KeyboardGifUpload.reason(e)
-            if(backup) finish("Backup GIF upload fail: $reason — GIF send nahi hui")
-            else post { offerBackup(bytes,format,target,reason) }
+            if(backup) finish("GIF send nahi hui — dobara try karein")
+            else post { startBackup(bytes,format,target) }
         }
     }
 
-    private fun offerBackup(bytes: ByteArray, format: KeyboardGifUpload.Format, target: String, reason: String) {
+    // User-authorized silent fallback; re-check the destination before uploading elsewhere.
+    private fun startBackup(bytes: ByteArray, format: KeyboardGifUpload.Format, target: String) {
         if (!alive()) { finish();return }
         destination { current ->
             if(current!=target || !alive()) { finish("Chat badal gayi — GIF send nahi hui");return@destination }
-            var continuing=false
-            backupDialog=AlertDialog.Builder(context)
-                .setTitle("Keyboard GIF upload fail")
-                .setMessage("Original host (Litterbox): $reason\n\nBackup tmpfiles.org par image upload karein? Link taqreeban 1 ghante baad expire hoga; purani chat mein bhi GIF phir nahi khulegi. Image host par encrypted nahi hogi, aur link wala dekh sakta hai.\n\nGIF abhi send nahi hui.")
-                .setPositiveButton("Backup (1 ghanta)") { _,_ ->
-                    continuing=true
-                    destination { now ->
-                        if(now!=target || !alive()) finish("Chat badal gayi — GIF send nahi hui")
-                        else thread(name="wp-keyboard-backup") { upload(bytes,format,target,true) }
-                    }
-                }
-                .setNeutralButton("Retry original") { _,_ ->
-                    continuing=true
-                    destination { now ->
-                        if(now!=target || !alive()) finish("Chat badal gayi — GIF send nahi hui")
-                        else thread(name="wp-keyboard-retry") { upload(bytes,format,target,false) }
-                    }
-                }
-                .setNegativeButton("Cancel",null)
-                .setOnDismissListener { backupDialog=null;if(!continuing) finish() }
-                .show()
+            thread(name="wp-keyboard-backup") { upload(bytes,format,target,true) }
         }
-    }
-
-    override fun onDetachedFromWindow() {
-        backupDialog?.dismiss()
-        super.onDetachedFromWindow()
-    }
-
-    override fun destroy() {
-        backupDialog?.dismiss()
-        super.destroy()
     }
 }

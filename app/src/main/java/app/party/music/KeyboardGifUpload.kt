@@ -121,7 +121,7 @@ internal object KeyboardGifUpload {
         val link=post("https://litterbox.catbox.moe/resources/internals/api.php",bytes,format,false)
         return verifyImage(allowedUrl(link,"litter.catbox.moe"),bytes)
     }
-    /** Only call after explicit per-upload consent to the shorter-lived backup host. */
+    /** Short-lived backup, automatically attempted once after primary failure (user-authorized). */
     fun backup(bytes: ByteArray, format: Format): String {
         val json=post("https://tmpfiles.org/api/v1/upload",bytes,format,true)
         // API only needs a URL string; narrowly accept a plain trusted HTTPS URL, no escaped strings.
