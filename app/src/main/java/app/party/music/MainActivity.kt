@@ -560,8 +560,8 @@ class MainActivity : Activity() {
               window.wpSendGif(${org.json.JSONObject.quote(gifUrl)});return 'dispatched';
             })()"""
             web.evaluateJavascript(script) { result ->
-                if (result == "\"chat-changed\"") showBanner("Chat badal gayi — GIF send nahi hui; dobara select karein")
-                else if (result != "\"dispatched\"") showBanner("GIF upload hui, lekin chat ready nahi — dobara try karein")
+                if (result == "\"chat-changed\"") showBanner("♡ Chat badal gayi — GIF dobara select karein.")
+                else if (result != "\"dispatched\"") showBanner("♡ Chat abhi tayyar nahi — ek baar phir koshish karein.")
             }
         }
         web.onGifError = { msg -> showBanner(msg) }

@@ -67,29 +67,28 @@ class GifWebView(context: Context) : WebView(context) {
         EditorInfoCompat.setContentMimeTypes(outAttrs,arrayOf("image/gif","image/png","image/jpeg","image/webp"))
         return InputConnectionCompat.createWrapper(ic,outAttrs) { info,flags,_ ->
             if (!busy.compareAndSet(false,true)) {
-                post { if(alive()) onGifError?.invoke("Pehli keyboard GIF abhi process ho rahi hai") }
                 return@createWrapper true
             }
             val permission = AtomicBoolean(false)
             fun release() { if (permission.compareAndSet(true,false)) try { info.releasePermission() } catch (_: Exception) {} }
             if (Build.VERSION.SDK_INT >= 25 && (flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION) != 0) {
                 try { info.requestPermission();permission.set(true) }
-                catch (_: Exception) { finish("Keyboard image ki read permission nahi mili");return@createWrapper true }
+                catch (_: Exception) { finish("♡ GIF khul nahi saki — dobara select karein.");return@createWrapper true }
             }
             // Capture routing on the UI thread before reading/uploading. destination() has a
             // timeout, so even an unresponsive renderer cannot retain the provider grant forever.
             post {
                 destination { target ->
-                    if (target.isEmpty()) { release();finish("Pehle DM ya joined room chat kholein") }
+                    if (target.isEmpty()) { release();finish("♡ GIF bhejne ke liye pehle chat kholein.") }
                     else thread(name="wp-keyboard-image") {
                         val bytes = try {
                             context.contentResolver.openInputStream(info.contentUri)?.use { KeyboardGifUpload.readBounded(it) }
                                 ?: throw KeyboardGifUpload.Failure("Keyboard image open nahi hui")
                         } catch (e: Exception) {
-                            finish("Keyboard image read fail: ${KeyboardGifUpload.reason(e)}");null
+                            finish(if (e is KeyboardGifUpload.Failure && e.detail.contains("12 MiB")) "♡ GIF thori bari hai — chhoti GIF select karein." else "♡ GIF khul nahi saki — dobara select karein.");null
                         } finally { release() }
                         if (bytes != null) {
-                            val format = try { KeyboardGifUpload.format(bytes) } catch(e: Exception) { finish(KeyboardGifUpload.reason(e));null }
+                            val format = try { KeyboardGifUpload.format(bytes) } catch(e: Exception) { finish("♡ Yeh image khul nahi saki — doosri select karein.");null }
                             if (format != null) upload(bytes,format,target,false)
                         }
                     }
@@ -108,7 +107,7 @@ class GifWebView(context: Context) : WebView(context) {
                 finish()
             }
         } catch(e: Exception) {
-            if(backup) finish("GIF send nahi hui — dobara try karein")
+            if(backup) finish("♡ GIF nahi ja saki — ek baar phir koshish karein.")
             else post { startBackup(bytes,format,target) }
         }
     }
@@ -117,7 +116,7 @@ class GifWebView(context: Context) : WebView(context) {
     private fun startBackup(bytes: ByteArray, format: KeyboardGifUpload.Format, target: String) {
         if (!alive()) { finish();return }
         destination { current ->
-            if(current!=target || !alive()) { finish("Chat badal gayi — GIF send nahi hui");return@destination }
+            if(current!=target || !alive()) { finish("♡ Chat badal gayi — GIF dobara select karein.");return@destination }
             thread(name="wp-keyboard-backup") { upload(bytes,format,target,true) }
         }
     }
