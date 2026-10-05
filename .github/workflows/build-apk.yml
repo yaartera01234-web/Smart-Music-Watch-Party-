@@ -1,8 +1,8 @@
-name: Build v117 MPV fullscreen TEST5 (separate package)
+name: Build v117 MPV FINAL (original package)
 
 on:
   push:
-    branches: [ test/v117-144-ytdlp ]
+    branches: [ release/v117-mpv-final ]
   workflow_dispatch:
 
 permissions:
@@ -20,61 +20,78 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.11.1
-      - name: Verify pinned extractor
-        run: echo '1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6  app/src/main/res/raw/ytdlp' | sha256sum -c -
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Verify pinned extractor and original-package identity
+        run: |
+          echo '1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6  app/src/main/res/raw/ytdlp' | sha256sum -c -
+          python - <<'PY'
+          import re
+          s=open('app/build.gradle.kts').read()
+          assert re.search(r'applicationId\s*=\s*"app.party.music"',s)
+          assert re.search(r'versionCode\s*=\s*124\b',s)
+          assert '117-MPV-FINAL' in s
+          PY
       - name: Sync policy and simulated transport tests
         run: node tests/sync-policy.cjs
-      - name: Unit tests and separate-package APK
+      - name: JVM tests and signed original-package APK
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-FULLSCREEN-TEST5.apk
-          ls -lh Music-WP-117-MPV-FULLSCREEN-TEST5.apk
+          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-117-FINAL.apk
+          ls -lh Music-Watch-Party-117-FINAL.apk
+      - name: Verify APK package, version and existing original signing certificate
+        run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)
+          SIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          "$AAPT" dump badging Music-Watch-Party-117-FINAL.apk > /tmp/badging.txt
+          grep -F "package: name='app.party.music' versionCode='124' versionName='117-MPV-FINAL'" /tmp/badging.txt
+          "$SIGNER" verify --print-certs Music-Watch-Party-117-FINAL.apk > /tmp/signature.txt
+          grep -F '842e2d5518d28a1d0c3aff8a16646cead9c58a619884a21a6a41792c04bffb33' /tmp/signature.txt
+          sha256sum Music-Watch-Party-117-FINAL.apk > SHA256SUMS.txt
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-WP-117-MPV-FULLSCREEN-TEST5
+          name: Music-Watch-Party-117-FINAL
           path: |
-            Music-WP-117-MPV-FULLSCREEN-TEST5.apk
+            Music-Watch-Party-117-FINAL.apk
+            SHA256SUMS.txt
             app/build/reports/tests/testDebugUnitTest/
-      - name: Publish isolated test APK (NOT original package)
-        if: github.ref == 'refs/heads/test/v117-144-ytdlp'
+      - name: Publish user-approved original-package final
+        if: github.ref == 'refs/heads/release/v117-mpv-final'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-mpv-fullscreen-test5
+          tag_name: v117-mpv-final
           target_commitish: ${{ github.sha }}
-          prerelease: true
-          make_latest: false
-          name: 'Music WP v117 — MPV fullscreen TEST5 (separate app)'
+          prerelease: false
+          make_latest: true
+          name: 'Music Watch Party v117 — MPV FINAL (original app update)'
           body: |
-            Test only. Updates the isolated Music WP 144 TEST app; original package stays untouched.
-            Package: app.party.music.test144 · Label: Music WP 144 TEST
-            Version: 117-MPV-FULLSCREEN-TEST5 (internal versionCode 123)
-            Android 7+ · arm64-v8a.
+            Original-package update authorized by the user after TEST5 handset testing.
+            Package: app.party.music · Label: Music Watch Party
+            Version: 117-MPV-FINAL (internal versionCode 124)
+            Android 7+ · arm64-v8a. Same signing certificate as original v115.
+            Install over the original app; do not uninstall it first. TEST144 remains a separate app.
 
-            - On-device yt-dlp 2026.08.19 with Python + QuickJS; no external extraction server.
-            - YouTube iframe/API/media blocked in foreground and background WebViews; local API adapter routes controls to MPV.
-            - Browser players stay blocked; Retry only (YouTube fallback removed).
-            - Default exact 144p plus audio. No silently relabeled 360p fallback.
-            - MPV receives video and audio atomically at load time.
-            - Diagnostic badge removed. Native immersive fullscreen, left brightness/right media-volume gestures.
-            - Real MPV audio-track list and switching; only available tracks are offered.
-            - Direct MP4/MKV/MP3/HLS use MPV, with no HTML media source. MP3 cover/fallback artwork.
-            - Manual YouTube qualities through 1080p, filtered by source availability; default 144p.
-            - Normal-room Synkplay-inspired MQTT sync: 8s rewind, 1.5s slowdown, gentle nudge; no King.
-            - Versioned seek epochs, monotonic RTT compensation, stale-peer expiry and return anchoring.
-            - Fullscreen local aspect modes: Original, 16:9, 16:10, 4:3, 2.35:1, Pan & Scan.
-            - 100 MiB forward cache budget (50+50 for separate video/audio), 8 MiB backward; 24h read-ahead cap.
-            - Background/call clients are excluded from automatic drift correction; existing audio behavior retained.
-            - Both phones need TEST4 for automatic correction. Old clients keep explicit controls only.
-            - TEST5: fullscreen draws into landscape display-cutout area; only controls receive notch-safe padding.
-            - Fullscreen exit restores the prior cutout mode and normal fitted-window layout.
-            - Sync policy unchanged from TEST4. See TEST5-NOTES.md for verification limits.
+            Player/source code is unchanged from phone-tested TEST5 (d67e9e8).
+            - On-device yt-dlp + MPV; YouTube iframe/media blocked inside the APK; Retry MPV only.
+            - Default 144p, available manual qualities through 1080p, no Auto.
+            - MP4/MKV/MP3/HLS through MPV; real audio tracks and MP3 artwork/fallback.
+            - Immersive fullscreen, brightness/media-volume swipes and landscape cutout fix.
+            - Original/16:9/16:10/4:3/2.35:1/Pan & Scan display modes.
+            - Native sync: 8s rewind, slowdown and gentle correction, no fixed King.
+            - 100 MiB forward cache budget (50+50 for separate video/audio), limited backward cache.
+            - Existing background audio and message-notification services retained.
+            - Browser interoperability uses the already-deployed original HTML v44.
 
-            Test fullscreen system bars, gestures, actual multi-audio MKV switching, MP3 cover,
-            pause/resume, seek, quality switches, Party sync and lock/unlock on your phone.
-            No original-package final build is included.
-          files: Music-WP-117-MPV-FULLSCREEN-TEST5.apk
+            User-reported passes: APK/APK sync, HTML/APK MP4 and YouTube sync,
+            fullscreen cutout fix and lock-screen continuous playback.
+            These reports do not establish every device/network scenario.
+
+            KNOWN ISSUE DEFERRED AT USER REQUEST: intermittent unwanted playback after
+            Room Left / Recents removal / incoming room commands. No untested lifecycle
+            or notification-service fix is included in this final promotion.
+          files: |
+            Music-Watch-Party-117-FINAL.apk
+            SHA256SUMS.txt

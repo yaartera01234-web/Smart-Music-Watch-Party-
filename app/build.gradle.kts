@@ -8,12 +8,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.party.music.test144"  // ⚠️ TEST BUILD — alag package (side-by-side install, original app chhua nahi jayega)
+        applicationId = "app.party.music"      // Original app update, same package and signing key
         minSdk = 24
         targetSdk = 35
-        versionCode = 123                      // isolated sync/aspect TEST4
-        versionName = "117-MPV-FULLSCREEN-TEST5"
-        manifestPlaceholders["appLabel"] = "Music WP 144 TEST"   // asli app se pehchaan ke liye
+        versionCode = 124                      // Monotonic final update; tested source remains unchanged
+        versionName = "117-MPV-FINAL"
+        manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
