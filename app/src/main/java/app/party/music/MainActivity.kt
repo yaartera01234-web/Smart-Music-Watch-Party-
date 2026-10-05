@@ -552,9 +552,17 @@ class MainActivity : Activity() {
         } catch (t: Throwable) { Log.e("MusicParty", "mpv video init fail", t) }
 
         // Gboard ka GIF/sticker seedha chat me: upload hoke page ke wpSendGif se chala jata hai.
-        web.onGif = { gifUrl ->
-            val safe = gifUrl.replace("\\", "").replace("'", "\\'")
-            web.post { web.evaluateJavascript("window.wpSendGif && window.wpSendGif('" + safe + "')", null) }
+        web.onGif = { gifUrl, destination ->
+            // Check and dispatch in ONE JS evaluation: a late upload must never target another chat.
+            val script = """(function(){
+              if (${GifWebView.DESTINATION_JS} !== ${org.json.JSONObject.quote(destination)}) return 'chat-changed';
+              if (typeof window.wpSendGif !== 'function') return 'not-ready';
+              window.wpSendGif(${org.json.JSONObject.quote(gifUrl)});return 'dispatched';
+            })()"""
+            web.evaluateJavascript(script) { result ->
+                if (result == "\"chat-changed\"") showBanner("Chat badal gayi — GIF send nahi hui; dobara select karein")
+                else if (result != "\"dispatched\"") showBanner("GIF upload hui, lekin chat ready nahi — dobara try karein")
+            }
         }
         web.onGifError = { msg -> showBanner(msg) }
 

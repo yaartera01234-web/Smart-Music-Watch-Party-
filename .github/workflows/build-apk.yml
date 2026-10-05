@@ -1,8 +1,8 @@
-name: Build v117 MPV FINAL (original package)
+name: Build keyboard GIF TEST1 (original-package candidate)
 
 on:
   push:
-    branches: [ release/v117-mpv-final ]
+    branches: [ fix/keyboard-gif-125 ]
   workflow_dispatch:
 
 permissions:
@@ -30,68 +30,63 @@ jobs:
           import re
           s=open('app/build.gradle.kts').read()
           assert re.search(r'applicationId\s*=\s*"app.party.music"',s)
-          assert re.search(r'versionCode\s*=\s*124\b',s)
-          assert '117-MPV-FINAL' in s
+          assert re.search(r'versionCode\s*=\s*125\b',s)
+          assert '117-GIF-TEST1' in s
           PY
-      - name: Sync policy and simulated transport tests
-        run: node tests/sync-policy.cjs
+      - name: Sync and keyboard routing simulations
+        run: |
+          node tests/sync-policy.cjs
+          node tests/keyboard-gif-routing.cjs
       - name: JVM tests and signed original-package APK
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-117-FINAL.apk
-          ls -lh Music-Watch-Party-117-FINAL.apk
+          cp app/build/outputs/apk/debug/*.apk Music-Watch-Party-117-GIF-TEST1.apk
+          ls -lh Music-Watch-Party-117-GIF-TEST1.apk
       - name: Verify APK package, version and existing original signing certificate
         run: |
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)
           SIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
-          "$AAPT" dump badging Music-Watch-Party-117-FINAL.apk > /tmp/badging.txt
-          grep -F "package: name='app.party.music' versionCode='124' versionName='117-MPV-FINAL'" /tmp/badging.txt
-          "$SIGNER" verify --print-certs Music-Watch-Party-117-FINAL.apk > /tmp/signature.txt
+          "$AAPT" dump badging Music-Watch-Party-117-GIF-TEST1.apk > /tmp/badging.txt
+          grep -F "package: name='app.party.music' versionCode='125' versionName='117-GIF-TEST1'" /tmp/badging.txt
+          "$SIGNER" verify --print-certs Music-Watch-Party-117-GIF-TEST1.apk > /tmp/signature.txt
           grep -F '842e2d5518d28a1d0c3aff8a16646cead9c58a619884a21a6a41792c04bffb33' /tmp/signature.txt
-          sha256sum Music-Watch-Party-117-FINAL.apk > SHA256SUMS.txt
+          sha256sum Music-Watch-Party-117-GIF-TEST1.apk > SHA256SUMS.txt
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-Watch-Party-117-FINAL
+          name: Music-Watch-Party-117-GIF-TEST1
           path: |
-            Music-Watch-Party-117-FINAL.apk
+            Music-Watch-Party-117-GIF-TEST1.apk
             SHA256SUMS.txt
             app/build/reports/tests/testDebugUnitTest/
-      - name: Publish user-approved original-package final
-        if: github.ref == 'refs/heads/release/v117-mpv-final'
+      - name: Publish separate GIF test candidate (never replace stable)
+        if: github.ref == 'refs/heads/fix/keyboard-gif-125'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-mpv-final
+          tag_name: v117-gif-test1
           target_commitish: ${{ github.sha }}
-          prerelease: false
-          make_latest: true
-          name: 'Music Watch Party v117 — MPV FINAL (original app update)'
+          prerelease: true
+          make_latest: false
+          name: 'Keyboard GIF TEST1 — original-package update candidate'
           body: |
-            Original-package update authorized by the user after TEST5 handset testing.
-            Package: app.party.music · Label: Music Watch Party
-            Version: 117-MPV-FINAL (internal versionCode 124)
-            Android 7+ · arm64-v8a. Same signing certificate as original v115.
-            Install over the original app; do not uninstall it first. TEST144 remains a separate app.
+            Candidate only: handset keyboard send + peer receive still need testing.
+            Original app.party.music, versionCode 125, same signing certificate.
+            Installs over final 124 without uninstall. Stable 124 cannot be installed over
+            125 as a normal downgrade; do not uninstall to roll back or risk local data.
 
-            Player/source code is unchanged from phone-tested TEST5 (d67e9e8).
-            - On-device yt-dlp + MPV; YouTube iframe/media blocked inside the APK; Retry MPV only.
-            - Default 144p, available manual qualities through 1080p, no Auto.
-            - MP4/MKV/MP3/HLS through MPV; real audio tracks and MP3 artwork/fallback.
-            - Immersive fullscreen, brightness/media-volume swipes and landscape cutout fix.
-            - Original/16:9/16:10/4:3/2.35:1/Pan & Scan display modes.
-            - Native sync: 8s rewind, slowdown and gentle correction, no fixed King.
-            - 100 MiB forward cache budget (50+50 for separate video/audio), limited backward cache.
-            - Existing background audio and message-notification services retained.
-            - Browser interoperability uses the already-deployed original HTML v44.
+            Keyboard media: MIME signature detection; 12 MiB cap; bounded network reads;
+            provider permission release; HTTP/DNS/TLS/timeout diagnostics; same-chat guard.
+            Original Litterbox host remains first, with explicit manual retry.
+            On failure, OPTIONAL per-upload consent to tmpfiles.org backup. Its public,
+            unencrypted image link expires after about ONE HOUR, including old chat history.
+            Both upload routes verify downloaded bytes before dispatching the link.
+            Built-in GIF option, MPV, sync, calls, notifications and HTML v45 unchanged.
+            No fix for the separately deferred intermittent unwanted-playback issue.
 
-            User-reported passes: APK/APK sync, HTML/APK MP4 and YouTube sync,
-            fullscreen cutout fix and lock-screen continuous playback.
-            These reports do not establish every device/network scenario.
-
-            KNOWN ISSUE DEFERRED AT USER REQUEST: intermittent unwanted playback after
-            Room Left / Recents removal / incoming room commands. No untested lifecycle
-            or notification-service fix is included in this final promotion.
+            Sandbox: actual Kotlin uploader backup upload/download byte-match passed;
+            primary returned HTTP412. This does not establish the handset's root cause.
+            Local JVM/unit and routing simulations are not physical-device verification.
           files: |
-            Music-Watch-Party-117-FINAL.apk
+            Music-Watch-Party-117-GIF-TEST1.apk
             SHA256SUMS.txt
