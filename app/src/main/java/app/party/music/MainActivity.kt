@@ -123,6 +123,11 @@ class MainActivity : Activity() {
     @Volatile private var ytQuality: Int = 144            // user ki chuni hui quality (144/240/360)
     @Volatile private var ytLastUrl: String = ""          // fallback ke liye aakhri stream
     @Volatile private var ytLastAudio: String? = null
+    private var directMode = false
+    private var directKind = "mp4"
+    private var mediaTitle = "Watch Party"
+    private var availableQualities = listOf(144,240,360,480,720,1080)
+    private var fullscreenControls: MpvFullscreenControls? = null
     private var mpvOnlyMuted = false
     private var mpvOnlyRevision = 0
     private var mpvOnlySeekUntil = 0L
@@ -417,18 +422,7 @@ class MainActivity : Activity() {
         // v25 bridge: page se native player kholne ke liye (window.YaarNative.openPlayer)
         web.addJavascriptInterface(object {
             @android.webkit.JavascriptInterface
-            fun openPlayer(videoUrl: String, title: String?) {
-                runOnUiThread {
-                    try {
-                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java).apply {
-                            putExtra("url", videoUrl)
-                            putExtra("title", title ?: "Video")
-                        })
-                    } catch (t: Throwable) {
-                        showBanner("⚠️ Native player nahi khula")
-                    }
-                }
-            }
+            fun openPlayer(videoUrl: String, title: String?) { runOnUiThread { openNative(videoUrl,title) } }
 
             /* v26: DM notification — page se aati hai, sirf jab app saamne na ho */
             @android.webkit.JavascriptInterface
@@ -476,9 +470,21 @@ class MainActivity : Activity() {
             fun clearIncomingCall() { CallForegroundService.stop(this@MainActivity) }
 
             @android.webkit.JavascriptInterface
+            fun mpvDirectLoad(url: String, kind: String, title: String, pos: Double, play: Boolean, revision: Int) {
+                val uri = try { Uri.parse(url) } catch (_: Throwable) { return }
+                if (uri.scheme !in listOf("http","https") || uri.host.isNullOrBlank() || !pos.isFinite()) return
+                runOnUiThread {
+                    mpvOnlyRevision=revision;directMode=true;directKind=if(kind=="mp3")"mp3" else if(kind=="hls")"hls" else "mp4"
+                    mediaTitle=title.take(200);mpvOnlyDialogId="";ytVideoTry=1
+                    if(!MusicService.nativeAlive())beginDirect(url,pos,play)
+                }
+            }
+
+            @android.webkit.JavascriptInterface
             fun mpvOnlyLoad(id: String, pos: Double, play: Boolean, revision: Int) {
                 if (!Regex("[A-Za-z0-9_-]{11}").matches(id) || !pos.isFinite()) return
                 runOnUiThread {
+                    directMode=false;mediaTitle="YouTube"
                     mpvOnlyRevision = revision
                     mpvOnlyDialogId = ""
                     ytLastPos = pos.coerceAtLeast(0.0); ytLastPlaying = play
@@ -855,7 +861,7 @@ class MainActivity : Activity() {
 
     /* ---------------- v30: native player ko page se khud pakro ---------------- */
 
-    private val JS_WATCH = "(function(){try{var v=document.getElementById('mp4-player');if(!v)return '';" +
+    private val JS_WATCH = "(function(){try{if(window.__wpMpvOnly)return '';var v=document.getElementById('mp4-player');if(!v)return '';" +
             "var u=v.currentSrc||v.src||'';if((v.className||'').indexOf('hidden')>=0)return '';" +
             "if(u.indexOf('http')!==0&&u.indexOf('blob:')!==0)return '';return u;}catch(e){return '';}})()"
 
@@ -877,17 +883,8 @@ class MainActivity : Activity() {
     }
 
     private fun openNative(url: String, title: String?, alt: String? = null) {
-        if (url.isBlank()) return
-        pausePagePlayer()
-        runOnUiThread {
-            try {
-                startActivity(Intent(this, PlayerActivity::class.java).apply {
-                    putExtra("url", url)
-                    putExtra("title", title ?: "Video")
-                    if (!alt.isNullOrBlank()) putExtra("alt", alt)
-                })
-            } catch (t: Throwable) { showBanner("\u26a0\ufe0f Native player nahi khula") }
-        }
+        val data=org.json.JSONObject().put("url",url).put("type",if(url.substringBefore('?').endsWith(".mp3",true))"mp3" else "mp4").put("title",title?:"Media")
+        web.evaluateJavascript("loadVideoLocal($data,true)",null)
     }
 
     private fun tapNative() {
@@ -955,11 +952,7 @@ class MainActivity : Activity() {
      * BUILD 14: AV1 / MKV files — ye page (premium player) par crash karti hain aur MPV par bhi
      * masla karti hain. Is liye in ko MPV ke paas bhejna hi nahi (na prewarm, na lock par handoff).
      */
-    private fun isMpvBlocked(id: String?): Boolean {
-        if (id.isNullOrBlank()) return false
-        val u = id.substringBefore('?').lowercase()
-        return u.contains(".mkv") || u.contains(".av1")
-    }
+    private fun isMpvBlocked(id: String?): Boolean = false
 
     private fun maybePrewarm(s: WebBridge.Snapshot) {
         try {
@@ -985,9 +978,13 @@ class MainActivity : Activity() {
      */
     private fun syncYtVideo(s: WebBridge.Snapshot) {
         try {
+            if(s.type in listOf("mp4","mp3","hls")) {
+                if(!MusicService.nativeAlive() && (ytVideoId!=s.id || !directMode)){directMode=true;directKind=s.type;mediaTitle=s.title;beginDirect(s.id,s.position,s.playing)}
+                return
+            }
             if (!s.isYoutube || s.id.isBlank() || s.id.length != 11) { endYtVideo(); return }
             if (MusicService.nativeAlive()) return              // lock/unlock ka apna rasta hai
-            if (s.id != ytVideoId) { startYtVideo(s); return }
+            if (s.id != ytVideoId || directMode) { directMode=false; startYtVideo(s); return }
             // MPV is authoritative. Polling its own mirrored state must not replay/seek
             // the native engine. Remote/local controls reach the API adapter directly.
 
@@ -1010,8 +1007,25 @@ class MainActivity : Activity() {
             if (id.isBlank()) return
             if (MusicService.nativeAlive()) return
             ytVideoTry += 1
-            beginYtVideo(id, ytLastPos, ytLastPlaying)
+            if(directMode)beginDirect(id,ytLastPos,ytLastPlaying) else beginYtVideo(id, ytLastPos, ytLastPlaying)
         } catch (t: Throwable) {}
+    }
+
+    private fun beginDirect(url: String, pos: Double, playing: Boolean) {
+        val generation=++ytResolveGeneration
+        ytVideoId=url;ytVideoState=1;ytFastPoll=true;ytLastPos=pos;ytLastPlaying=playing
+        mpvVideo.ensure();mpvVideo.stop();lastYtBuf=false
+        fun loadWhenReady(attempt: Int) {
+            if(generation!=ytResolveGeneration||ytVideoId!=url)return
+            if(!mpvVideo.isReady){
+                if(attempt>=100){failYtVideo(url,"MPV core not ready");return}
+                handoffHandler.postDelayed({loadWhenReady(attempt+1)},100);return
+            }
+            mpvVideo.play(url,ytLastPos,startMuted=true)
+            if(!ytLastPlaying)mpvVideo.pause()
+            armYtWatch(url,0)
+        }
+        loadWhenReady(0)
     }
 
     /** Asli kaam: stream nikaalo aur MPV par chalao. */
@@ -1035,6 +1049,9 @@ class MainActivity : Activity() {
                 try {
                     if (ytVideoId != wantId || generation != ytResolveGeneration) return@post
                     if (r == null) { failYtVideo(wantId, "yt-dlp: ${requestedQuality}p + audio nahi mili"); return@post }
+                    availableQualities = r.qualities.ifEmpty { listOf(ytQuality) }
+                    mediaTitle = r.title ?: mediaTitle
+                    web.evaluateJavascript("window.__wpOnlyQualities && window.__wpOnlyQualities(${org.json.JSONArray(availableQualities)})",null)
                     ytLastUrl = r.url
                     ytLastAudio = r.audioUrl
                     mpvVideo.play(r.url, ytLastPos, startMuted = true,
@@ -1052,7 +1069,7 @@ class MainActivity : Activity() {
             override fun run() {
                 try {
                     if (ytVideoId != id) return
-                    if (mpvVideo.hasFrame() && mpvVideo.audioCodec().isNotBlank()) { activateYtVideo(id); return }
+                    if (if(directMode)mpvVideo.loaded() else (mpvVideo.hasFrame() && mpvVideo.audioCodec().isNotBlank())) { activateYtVideo(id); return }
                     val err = mpvVideo.error
                     // slow net: pehla frame aane me waqt lag sakta hai -> 30s tak intezaar (user ko dikhao)
                     if (attempt == 16 && !ytSlowBanner) {
@@ -1080,8 +1097,7 @@ class MainActivity : Activity() {
             ytStallPos = -1.0
             lastYtBuf = false; lastYtBufPct = 0
             try { web.evaluateJavascript(WebBridge.mpvBufJs(false, 0), null) } catch (t: Throwable) {}
-            if (!ytVideoBanner) { ytVideoBanner = true; showBanner("🎬 MPV: ${mpvVideo.actualHeight()}p + ${mpvVideo.audioCodec()} · yt-dlp TEST") }
-            reportYtDiagnostic()
+            if (!ytVideoBanner) { ytVideoBanner = true; showBanner("▶ MPV ready") }
             Log.i("MusicParty", "yt video active: $id")
         } catch (t: Throwable) {}
     }
@@ -1103,15 +1119,11 @@ class MainActivity : Activity() {
                 mpvOnlyDialogId = id
                 AlertDialog.Builder(this)
                     .setTitle("MPV playback failed")
-                    .setMessage("YouTube iframe is OFF. Retry MPV, or explicitly open YouTube outside this test app.")
+                    .setMessage("Browser media players are disabled. Check the link or retry MPV.")
                     .setPositiveButton("Retry MPV") { _, _ -> mpvOnlyDialogId = ""; retryYtVideo() }
-                    .setNeutralButton("Open YouTube") { _, _ ->
-                        ytLastPlaying = false; mpvVideo.stop(); MusicService.stopNative()
-                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$id"))) } catch (_: Throwable) {}
-                    }
                     .setNegativeButton("Cancel", null).show()
             }
-            showBanner("⚠️ MPV failed — iframe OFF; choose Retry or Open YouTube")
+            showBanner("⚠️ MPV failed — check link or Retry; browser player stays OFF")
         } catch (t: Throwable) {}
     }
 
@@ -1161,7 +1173,8 @@ class MainActivity : Activity() {
     /** 🎚️ Quality badli: naya stream usi jagah se chalao (aawaz alag wali bhi jodi jaye). */
     private fun switchYtQuality(h: Int) {
         try {
-            val q = if (h <= 144) 144 else if (h <= 240) 240 else 360
+            if(directMode || h !in listOf(144,240,360,480,720,1080))return
+            val q = h
             if (q == ytQuality && mpvVideo.hasFrame()) return      // wahi quality pehle se
             val id = ytVideoId
             if (id.isBlank() || ytVideoState != 2) {
@@ -1202,15 +1215,6 @@ class MainActivity : Activity() {
 
     /** Slow net ya URL expire: position kuch der se nahi barhi -> dobara koshish; baar baar ho to page par wapas.
         (App tang nahi karta: MPV apni thread par chalta hai; ye sirf recovery hai.) */
-    private fun reportYtDiagnostic() {
-        val height = mpvVideo.actualHeight()
-        val audio = mpvVideo.audioCodec()
-        val label = if (height > 0) "MPV actual ${height}p · ${if (audio.isNotBlank()) audio else "audio waiting"}" else "MPV loading…"
-        if (label == ytDiagnostic) return
-        ytDiagnostic = label
-        try { web.evaluateJavascript(WebBridge.mpvTestStatusJs(label), null) } catch (_: Throwable) {}
-    }
-
     private fun checkYtStall() {
         try {
             if (ytVideoState != 2) return
@@ -1251,25 +1255,28 @@ class MainActivity : Activity() {
 
     /** Apna MPV fullscreen: page layout full-screen ho jata hai; hum rect + screen-on theek karte hain. */
     private fun enterYtFs() {
-        try {
-            ytFsOn = true
-            try { window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } catch (t: Throwable) {}
-            for (d in longArrayOf(120L, 400L, 900L)) {
-                handoffHandler.postDelayed({ try { updateYtRect() } catch (t: Throwable) {} }, d)
-            }
-            Log.i("MusicParty", "yt fullscreen ON")
-        } catch (t: Throwable) {}
+        if(ytFsOn || ytVideoState!=2)return
+        ytFsOn=true
+        mpvVideo.setFullscreen(true)
+        try { (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(web.windowToken,0) } catch (_: Throwable) {}
+        web.visibility=View.INVISIBLE
+        val controls=MpvFullscreenControls(this,mpvVideo,
+            send={cmd->if(cmd.startsWith("quality:"))handleMpvCommand(cmd) else web.evaluateJavascript("window.__wpUnifiedCommand && window.__wpUnifiedCommand(${org.json.JSONObject.quote(cmd)})",null)},
+            exit={exitYtFs()},sourceTitle={mediaTitle},isYoutube={!directMode},isAudio={directMode&&(directKind=="mp3" || (mpvVideo.actualHeight()==0 && mpvVideo.audioCodec().isNotBlank()))},
+            quality={ytQuality},qualities={availableQualities})
+        fullscreenControls=controls;root.addView(controls,FrameLayout.LayoutParams(-1,-1))
     }
-
     private fun exitYtFs() {
-        try {
-            ytFsOn = false
-            try { window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } catch (t: Throwable) {}
-            for (d in longArrayOf(120L, 400L)) {
-                handoffHandler.postDelayed({ try { updateYtRect() } catch (t: Throwable) {} }, d)
-            }
-            Log.i("MusicParty", "yt fullscreen OFF")
-        } catch (t: Throwable) {}
+        if(!ytFsOn)return
+        ytFsOn=false
+        fullscreenControls?.let { it.release();root.removeView(it) };fullscreenControls=null
+        mpvVideo.setFullscreen(false);web.visibility=View.VISIBLE
+        web.evaluateJavascript("window.__wpMpvFsOn=false",null)
+        for(delay in longArrayOf(50,250,600))handoffHandler.postDelayed({updateYtRect()},delay)
+    }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if(hasFocus&&ytFsOn)fullscreenControls?.immerse()
     }
 
     /** Fullscreen ko chup-chaap band karo (video khatam / fail par). */
@@ -1314,15 +1321,12 @@ class MainActivity : Activity() {
 
     /** Lock ke baad: aawaz service se wapas MPV (video + audio) par — bina gap ke. */
     private fun handBackToMpvVideo() {
-        val id = MusicService.nativeItemKey()
-        if (!Regex("[A-Za-z0-9_-]{11}").matches(id)) return
-        val pos = MusicService.nativePosition()
-        val play = MusicService.nativeWasPlaying()
-        // Stop the audio-only service, then resolve the matching video+audio pair.
-        // A brief reload gap is preferable to two simultaneously-playing engines.
+        val id=MusicService.nativeItemKey();val youtube=MusicService.nativeIsYoutube()
+        val pos=MusicService.nativePosition();val play=MusicService.nativeWasPlaying()
+        if(id.isBlank())return
         MusicService.stopNative()
-        ytLastPos = pos; ytLastPlaying = play
-        beginYtVideo(id, pos, play)
+        directMode=!youtube
+        if(youtube)beginYtVideo(id,pos,play) else beginDirect(id,pos,play)
     }
 
     /** Fullscreen view + uske bachon ka background transparent (taake peeche MPV surface dikhe). */
@@ -1357,13 +1361,13 @@ class MainActivity : Activity() {
                         lastYtBuf = buf; lastYtBufPct = bpct
                         web.evaluateJavascript(WebBridge.mpvBufJs(buf, bpct), null)
                     }
-                    reportYtDiagnostic()
+                    fullscreenControls?.tick()
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (now >= mpvOnlySeekUntil || kotlin.math.abs(mpvVideo.position() - mpvOnlySeekTarget) < 1.0) {
                         val packet = org.json.JSONObject().put("id", ytVideoId).put("rev", mpvOnlyRevision)
                             .put("t", mpvVideo.position()).put("d", mpvVideo.duration())
                             .put("playing", !mpvVideo.isPaused() && !mpvVideo.ended()).put("muted", mpvVideo.isMuted())
-                            .put("ended", mpvVideo.ended())
+                            .put("ended", mpvVideo.ended()).put("art",mpvVideo.hasArtwork()).put("audioOnly",directMode && mpvVideo.actualHeight()==0 && mpvVideo.audioCodec().isNotBlank())
                         web.evaluateJavascript("window.__wpOnlyReport && window.__wpOnlyReport($packet)", null)
                     }
                     checkYtStall()   // video ruki hui hai? -> khud recovery
@@ -1518,7 +1522,7 @@ class MainActivity : Activity() {
                     val playing = res?.contains("1") == true
                     if (playing || !play) {
                         // YouTube hai -> aawaz wapas MPV (video + audio) par le jao
-                        if (MusicService.nativeIsYoutube() && !ytHandbackDone) {
+                        if (!ytHandbackDone) {
                             ytHandbackDone = true
                             handBackToMpvVideo()
                         } else {
@@ -1593,6 +1597,7 @@ class MainActivity : Activity() {
                 lastQueueJson = null
             }
         } catch (t: Throwable) {}
+        fullscreenControls?.release();fullscreenControls=null
         super.onDestroy()
     }
 

@@ -101,18 +101,11 @@ class NativeAudioEngine(private val appContext: Context) {
             isYoutubeSource = fromYoutube
 
             mpv.setString("pause", "yes")
-            if (startPosition > 1.0) {
-                // mpv ka file option: loadfile <url> replace <index> <options>
-                mpv.command(
-                    "loadfile", url, "replace", "0",
-                    String.format(Locale.US, "start=%.3f", startPosition)
-                ).getOrThrow()
-                pendingSeek = startPosition
-                pendingSeekTries = 0
-            } else {
-                mpv.command("loadfile", url, "replace").getOrThrow()
-                pendingSeek = null
-            }
+            val options=mutableListOf(String.format(Locale.US, "start=%.3f", startPosition.coerceAtLeast(0.0)))
+            AudioTrackMemory.get(url)?.let { options += "aid=$it" }
+            mpv.command("loadfile",url,"replace","-1",options.joinToString(",")).getOrThrow()
+            pendingSeek = startPosition.takeIf { it > 1.0 }
+            pendingSeekTries = 0
             mpv.setString("pause", "no")
             playing = true
             true

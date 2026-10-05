@@ -777,16 +777,6 @@ object WebBridge {
     /** MPV ki chuni hui quality page ke select par dikhao. */
     fun mpvQualityJs(h: Int): String = "window.__wpMpvQ ? window.__wpMpvQ($h) : 'fail'"
 
-    /** Test-only badge: decoded MPV height/codec, not merely requested quality. */
-    fun mpvTestStatusJs(label: String): String = """
-        (function(){try{
-          var q=document.getElementById('premium-video-quality');if(!q||!window.__wpMpvLinked)return;
-          var b=document.getElementById('wp-mpv-test-status');
-          if(!b){b=document.createElement('span');b.id='wp-mpv-test-status';b.style.cssText='font-size:9px;color:#b6efd1;white-space:nowrap;pointer-events:none';q.insertAdjacentElement('afterend',b);}
-          b.textContent=${org.json.JSONObject.quote(label)};
-        }catch(e){}})();
-    """.trimIndent()
-
     /** Slow net: "⏳ Buffering" overlay on/off. */
     fun mpvBufJs(on: Boolean, pct: Int): String =
         "window.__wpMpvBuf ? window.__wpMpvBuf($on, $pct) : 'fail'"

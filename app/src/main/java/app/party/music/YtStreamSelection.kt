@@ -5,11 +5,11 @@ import org.json.JSONObject
 /** Strict metadata parsing shared by the Android resolver and unit tests. */
 internal object YtStreamSelection {
     data class Streams(val url: String, val audioUrl: String?, val height: Int,
-                       val audioCodec: String, val title: String?, val userAgent: String, val referer: String?)
+                       val audioCodec: String, val title: String?, val userAgent: String, val referer: String?, val qualities: List<Int>)
 
     fun format(height: Int): String {
         if (height <= 0) return "bestaudio[ext=m4a]/bestaudio"
-        require(height in listOf(144, 240, 360))
+        require(height in listOf(144, 240, 360, 480, 720, 1080))
         return "bestvideo[height=$height][vcodec^=avc1]+bestaudio[ext=m4a]/" +
             "bestvideo[height=$height]+bestaudio/best[height=$height]"
     }
@@ -30,8 +30,12 @@ internal object YtStreamSelection {
         val primary = video ?: audio
         val headers = primary.optJSONObject("http_headers") ?: info.optJSONObject("http_headers") ?: JSONObject()
         fun header(name: String) = text(headers, name).takeIf { it.isNotBlank() && !it.contains('\n') && !it.contains('\r') }
+        val formats=info.optJSONArray("formats")
+        val available=if(formats!=null)(0 until formats.length()).map { formats.getJSONObject(it) }
+            .filter { codec(it,"vcodec").isNotBlank() && it.optInt("height",0) in listOf(144,240,360,480,720,1080) }
+            .map { it.optInt("height") }.distinct().sorted() else listOf(height).filter { it>0 }
         return Streams(url(primary), if (video != null && audio !== video) url(audio) else null,
             video?.optInt("height", 0) ?: 0, codec(audio, "acodec"),
-            text(info, "title").takeIf { it.isNotBlank() }, header("User-Agent") ?: fallbackUA, header("Referer"))
+            text(info, "title").takeIf { it.isNotBlank() }, header("User-Agent") ?: fallbackUA, header("Referer"), available)
     }
 }

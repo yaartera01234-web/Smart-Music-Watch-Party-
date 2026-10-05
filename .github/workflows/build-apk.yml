@@ -1,4 +1,4 @@
-name: Build v117 MPV-only TEST2 (separate package)
+name: Build v117 MPV suite TEST3 (separate package)
 
 on:
   push:
@@ -26,40 +26,43 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-ONLY-TEST2.apk
-          ls -lh Music-WP-117-MPV-ONLY-TEST2.apk
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-MPV-SUITE-TEST3.apk
+          ls -lh Music-WP-117-MPV-SUITE-TEST3.apk
       - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-WP-117-MPV-ONLY-TEST2
+          name: Music-WP-117-MPV-SUITE-TEST3
           path: |
-            Music-WP-117-MPV-ONLY-TEST2.apk
+            Music-WP-117-MPV-SUITE-TEST3.apk
             app/build/reports/tests/testDebugUnitTest/
       - name: Publish isolated test APK (NOT original package)
         if: github.ref == 'refs/heads/test/v117-144-ytdlp'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-mpv-only-test2
+          tag_name: v117-mpv-suite-test3
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
-          name: 'Music WP v117 — MPV-only TEST2 (separate app)'
+          name: 'Music WP v117 — MPV suite TEST3 (separate app)'
           body: |
-            Test only. Original app and existing TEST2 are NOT replaced.
+            Test only. Updates the isolated Music WP 144 TEST app; original package stays untouched.
             Package: app.party.music.test144 · Label: Music WP 144 TEST
-            Version: 117-MPV-ONLY-TEST2 (internal versionCode 120)
+            Version: 117-MPV-SUITE-TEST3 (internal versionCode 121)
             Android 7+ · arm64-v8a.
 
             - On-device yt-dlp 2026.08.19 with Python + QuickJS; no external extraction server.
             - YouTube iframe/API/media blocked in foreground and background WebViews; local API adapter routes controls to MPV.
-            - Retry or explicit Open YouTube external fallback; no silent iframe playback.
+            - Browser players stay blocked; Retry only (YouTube fallback removed).
             - Default exact 144p plus audio. No silently relabeled 360p fallback.
             - MPV receives video and audio atomically at load time.
-            - Test badge reports actual MPV video height and audio codec.
+            - Diagnostic badge removed. Native immersive fullscreen, left brightness/right media-volume gestures.
+            - Real MPV audio-track list and switching; only available tracks are offered.
+            - Direct MP4/MKV/MP3/HLS use MPV, with no HTML media source. MP3 cover/fallback artwork.
+            - Manual YouTube qualities through 1080p, filtered by source availability; default 144p.
             - Existing Party protocol, chat, play/pause/seek and background service retained.
             - Headless extraction/MPV checks passed; real Android and mixed-version Party tests still required.
 
-            Use the supplied YouTube link, confirm `MPV actual 144p · aac` and audible sound,
-            then test pause/resume, seek, quality switches and Party sync.
+            Test fullscreen system bars, gestures, actual multi-audio MKV switching, MP3 cover,
+            pause/resume, seek, quality switches, Party sync and lock/unlock on your phone.
             No original-package final build is included.
-          files: Music-WP-117-MPV-ONLY-TEST2.apk
+          files: Music-WP-117-MPV-SUITE-TEST3.apk

@@ -7,6 +7,8 @@ import android.util.Log
 import android.view.View
 import android.widget.FrameLayout
 import io.github.yuroyami.libmpvkt.MpvProperties
+import io.github.yuroyami.libmpvkt.TrackType
+import io.github.yuroyami.libmpvkt.getOrThrow
 import io.github.yuroyami.libmpvkt.getOrNull
 import io.github.yuroyami.libmpvkt.view.MpvOptions
 import io.github.yuroyami.libmpvkt.view.MpvView
@@ -23,6 +25,8 @@ import java.util.concurrent.Executors
 class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
 
     private var view: MpvView? = null
+    private var currentSource = ""
+    private var fullscreen = false
     @Volatile private var coreReady = false
     @Volatile private var ensuring = false
     @Volatile private var localError: String? = null
@@ -81,6 +85,7 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
             try {
                 val v = view ?: return@post
                 if (v.mpv == null) { localError = "core tayyar nahi"; return@post }
+                currentSource = url
                 dispPos = -1.0
                 localError = null
                 v.muted = startMuted
@@ -90,9 +95,10 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
                 fun quoted(value: String) = "%${value.toByteArray(Charsets.UTF_8).size}%$value"
                 val options = mutableListOf("start=${if (pos.isFinite()) pos.coerceAtLeast(0.0) else 0.0}",
                     "user-agent=" + quoted(userAgent), "audio-files-clr=")
+                AudioTrackMemory.get(url)?.let { options += "aid=$it" }
                 if (!audioUrl.isNullOrBlank()) options += "audio-files-append=" + quoted(audioUrl)
                 if (!referer.isNullOrBlank()) options += "http-header-fields-append=" + quoted("Referer: $referer")
-                v.mpv?.command("loadfile", url, "replace", "-1", options.joinToString(","))
+                v.mpv?.command("loadfile", url, "replace", "-1", options.joinToString(","))?.getOrThrow()
                 Log.i(TAG, "play (muted=$startMuted) pos=$pos")
             } catch (t: Throwable) {
                 localError = t.message
@@ -158,6 +164,7 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
         main.post {
             try {
                 val v = view ?: return@post
+                if (fullscreen) return@post
                 val d = act.resources.displayMetrics.density
                 val lp = v.layoutParams as FrameLayout.LayoutParams
                 val nw = (w * d).toInt(); val nh = (h * d).toInt()
@@ -168,6 +175,32 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
             } catch (t: Throwable) {}
         }
     }
+
+    fun setFullscreen(on: Boolean) {
+        fullscreen = on
+        if(on) view?.layoutParams = FrameLayout.LayoutParams(-1, -1)
+    }
+    fun loaded(): Boolean = try { view?.timePos != null && (audioCodec().isNotBlank() || actualHeight()>0) } catch (_: Throwable) { false }
+    fun hasArtwork(): Boolean = try { view?.mpv?.get(MpvProperties.TrackList)?.getOrNull()?.any { it.isAlbumArt || it.isImage } == true } catch (_: Throwable) { false }
+    data class AudioTrack(val id: Int, val label: String, val selected: Boolean)
+    fun audioTracks(): List<AudioTrack> = try {
+        view?.mpv?.get(MpvProperties.TrackList)?.getOrNull().orEmpty().filter { it.type == TrackType.Audio }.map {
+            AudioTrack(it.id, listOfNotNull(it.lang?.takeIf { l -> l.isNotBlank() }, it.title?.takeIf { t -> t.isNotBlank() }, it.codec).joinToString(" · ").ifBlank { "Audio ${it.id}" }, it.selected)
+        }
+    } catch (_: Throwable) { emptyList() }
+    fun selectAudio(id: Int, done: (Boolean) -> Unit) {
+        if(audioTracks().none { it.id==id }) { done(false); return }
+        val source=currentSource
+        try {
+            view?.mpv?.setString("aid", id.toString())?.getOrThrow()
+            main.postDelayed({
+                val ok=source==currentSource && audioTracks().any { it.id==id && it.selected }
+                if(ok)AudioTrackMemory.put(source,id)
+                done(ok)
+            },450)
+        } catch (_: Throwable) { done(false) }
+    }
+    fun title(): String = try { view?.mpv?.get(MpvProperties.Metadata)?.getOrNull()?.get("title").orEmpty() } catch (_: Throwable) { "" }
 
     fun stop() { main.post { try { view?.mpv?.command("stop"); dispPos = -1.0 } catch (t: Throwable) {} } }
 

@@ -23,3 +23,13 @@
 - Video handback resolves video+audio rather than passing the background audio-only URL to a video surface. May have a reload gap; device lock/unlock test required.
 - Browser test: tests/mpv-only-browser.cjs with Playwright installed and WP_HTML pointing to the production HTML. Native player and transport are mocked; real page functions exercised. Not a real-device or real-broker test.
 - Phone tests required before an original-package build: controls, 144/240/360, mixed-version Party, queue next, lock/unlock and network/data observations.
+
+## TEST3 / Unified MPV suite (not original package)
+- Version 117-MPV-SUITE-TEST3, code 121. Updates existing app.party.music.test144.
+- Direct HTTP/HTTPS MP4, MKV, MP3 and HLS are routed to MPV; browser media element has no src.
+- Native fullscreen controller shares the existing MPV core: no duplicate player. Immersive system bars, sensor-landscape, back exits fullscreen; restores window brightness/orientation. System edge swipes can temporarily reveal bars.
+- Left vertical gesture changes window brightness; right changes AudioManager STREAM_MUSIC volume. Controls/timeline excluded from gesture interception.
+- Audio menu reads actual MPV track-list. Selection writes aid and verifies selected track; one-track files do not offer fake dual audio. Direct-file audio preference survives service handoff within the session.
+- Embedded MP3 art rendered by MPV when present; otherwise vinyl/gradient cover in inline and native fullscreen views.
+- Diagnostic line and YouTube fallback removed. Manual YouTube heights 144/240/360/480/720/1080, default 144, available choices filtered from extractor metadata. Direct files have no fake resolution dropdown.
+- Tests must distinguish browser mock/control tests and Linux MPV codec tests from handset-only brightness, system volume, fullscreen bars, codec support and real-party sync. No original-package final until user confirms.

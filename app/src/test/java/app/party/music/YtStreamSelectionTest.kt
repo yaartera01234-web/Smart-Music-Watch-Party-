@@ -45,6 +45,13 @@ class YtStreamSelectionTest {
         parse("""{"url":"https://video.example/play","height":144}""")
     }
     @Test fun unsupportedQualityIsNotSilentlyAccepted() {
-        assertThrows(IllegalArgumentException::class.java) { YtStreamSelection.format(720) }
+        assertThrows(IllegalArgumentException::class.java) { YtStreamSelection.format(2160) }
+    }
+    @Test fun sixManualHeightsSupported() {
+        for(h in listOf(144,240,360,480,720,1080)) assertTrue(YtStreamSelection.format(h).contains("height=$h"))
+    }
+    @Test fun availableQualitiesComeFromSource() {
+        val info="""{"requested_formats":[$video,$audio],"formats":[{"vcodec":"h264","height":144},{"vcodec":"h264","height":720},{"vcodec":"none","height":1080}]}"""
+        assertEquals(listOf(144,720),parse(info).qualities)
     }
 }

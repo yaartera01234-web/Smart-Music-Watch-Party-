@@ -207,19 +207,6 @@ class MusicService : Service() {
         currentKey = item.key
         if (item.label.isNotBlank()) lastNoteTitle = item.label
 
-        // build 14: AV1/MKV files MPV par nahi chalai jati (page + MPV dono in par masla karte hain).
-        // Lock me auto-next agar aisi file par pohanch jaye -> MPV ko chhedo hi nahi.
-        if (!item.isYoutube) {
-            val u = item.url.substringBefore('?').lowercase()
-            if (u.contains(".mkv") || u.contains(".av1")) {
-                try { engine?.stopPlayback() } catch (t: Throwable) {}
-                lastError = null
-                lastNoteBody = "AV1/MKV file — background me nahi chal sakti"
-                startForegroundNow()
-                return
-            }
-        }
-
         if (item.isYoutube) {
             val videoId = YtAudioSource.videoIdOf(item.videoId)
             if (videoId == null) {

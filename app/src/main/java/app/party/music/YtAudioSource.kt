@@ -21,7 +21,7 @@ object YtAudioSource {
     private val cache = LinkedHashMap<String, Pair<Long, Result>>()
     private val deadline = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "yt-dlp-timeout").apply { isDaemon = true } }
     data class Result(val url: String, val title: String?, val audioUrl: String? = null,
-                      val height: Int = 0, val audioCodec: String = "", val userAgent: String = UA, val referer: String? = null)
+                      val height: Int = 0, val audioCodec: String = "", val userAgent: String = UA, val referer: String? = null, val qualities: List<Int> = emptyList())
 
     // Called by Activity and service: never unzip Python on the UI thread.
     fun ensureInit(context: Context) { app = context.applicationContext }
@@ -79,7 +79,7 @@ object YtAudioSource {
             } finally { timeout.cancel(false) }
             check(!expired.get()) { "Extractor timeout" }
             val stream = YtStreamSelection.parse(response.out, preferHeight, UA)
-            val result = Result(stream.url, stream.title, stream.audioUrl, stream.height, stream.audioCodec, stream.userAgent, stream.referer)
+            val result = Result(stream.url, stream.title, stream.audioUrl, stream.height, stream.audioCodec, stream.userAgent, stream.referer, stream.qualities)
             cache[key] = SystemClock.elapsedRealtime() to result
             while (cache.size > 8) cache.remove(cache.keys.first())
             Log.i(TAG, "yt-dlp selected ${result.height}p + ${result.audioCodec}; separateAudio=${result.audioUrl != null}")
