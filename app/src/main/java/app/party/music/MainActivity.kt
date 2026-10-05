@@ -120,9 +120,11 @@ class MainActivity : Activity() {
     @Volatile private var ytStallPos: Double = -1.0        // video ruki to pakarne ke liye
     @Volatile private var ytStallAt: Long = 0L
     @Volatile private var ytSlowBanner: Boolean = false
-    @Volatile private var ytQuality: Int = 360            // user ki chuni hui quality (144/240/360)
+    @Volatile private var ytQuality: Int = 144            // user ki chuni hui quality (144/240/360)
     @Volatile private var ytLastUrl: String = ""          // fallback ke liye aakhri stream
     @Volatile private var ytLastAudio: String? = null
+    private var ytResolveGeneration = 0
+    private var ytDiagnostic = ""
     private var fsTick: Int = 0
 
     private val snapPoller = object : Runnable {
@@ -992,6 +994,9 @@ class MainActivity : Activity() {
     /** Asli kaam: stream nikaalo aur MPV par chalao. */
     private fun beginYtVideo(wantId: String, wantPos: Double, wantPlay: Boolean) {
         if (wantId.isBlank() || wantId.length != 11) return
+        val generation = ++ytResolveGeneration
+        val requestedQuality = ytQuality
+        ytDiagnostic = ""
         ytVideoId = wantId
         ytVideoState = 1
         ytSlowBanner = false
@@ -999,17 +1004,18 @@ class MainActivity : Activity() {
         mpvVideo.ensure()
         setYtMute(true)          // page ki aawaz foran band — MPV jab tayyar hoga aawaz dega
         ytResolver.execute {
-            // 360p (user ki marzi) — muxed me 360p ke sab se qareeb; na mile to video + alag audio
-            val r = try { YtAudioSource.resolve(wantId, validate = false, preferHeight = ytQuality) } catch (t: Throwable) { null }
+            // Exact requested height plus audio, resolved on-device by pinned yt-dlp.
+            val r = try { YtAudioSource.resolve(wantId, validate = false, preferHeight = requestedQuality) } catch (t: Throwable) { null }
             handoffHandler.post {
                 try {
-                    if (ytVideoId != wantId) return@post
-                    if (r == null) { failYtVideo(wantId, "stream nahi mili"); return@post }
+                    if (ytVideoId != wantId || generation != ytResolveGeneration) return@post
+                    if (r == null) { failYtVideo(wantId, "yt-dlp: ${requestedQuality}p + audio nahi mili"); return@post }
                     ytLastUrl = r.url
                     ytLastAudio = r.audioUrl
-                    mpvVideo.play(r.url, wantPos, startMuted = true)
-                    if (!r.audioUrl.isNullOrBlank()) mpvVideo.addAudio(r.audioUrl)   // video-only case: aawaz alag se
-                    if (!wantPlay) mpvVideo.pause()
+                    val current = lastSnap?.takeIf { it.isYoutube && it.id == wantId }
+                    mpvVideo.play(r.url, current?.position ?: wantPos, startMuted = true,
+                        audioUrl = r.audioUrl, userAgent = r.userAgent, referer = r.referer)
+                    if (!(current?.playing ?: wantPlay)) mpvVideo.pause()
                     armYtWatch(wantId, 0)
                 } catch (t: Throwable) {}
             }
@@ -1022,7 +1028,7 @@ class MainActivity : Activity() {
             override fun run() {
                 try {
                     if (ytVideoId != id) return
-                    if (mpvVideo.hasFrame()) { activateYtVideo(id); return }
+                    if (mpvVideo.hasFrame() && mpvVideo.audioCodec().isNotBlank()) { activateYtVideo(id); return }
                     val err = mpvVideo.error
                     // slow net: pehla frame aane me waqt lag sakta hai -> 30s tak intezaar (user ko dikhao)
                     if (attempt == 16 && !ytSlowBanner) {
@@ -1050,7 +1056,8 @@ class MainActivity : Activity() {
             ytStallPos = -1.0
             lastYtBuf = false; lastYtBufPct = 0
             try { web.evaluateJavascript(WebBridge.mpvBufJs(false, 0), null) } catch (t: Throwable) {}
-            if (!ytVideoBanner) { ytVideoBanner = true; showBanner("🎬 YouTube MPV par (video + audio)") }
+            if (!ytVideoBanner) { ytVideoBanner = true; showBanner("🎬 MPV: ${mpvVideo.actualHeight()}p + ${mpvVideo.audioCodec()} · yt-dlp TEST") }
+            reportYtDiagnostic()
             Log.i("MusicParty", "yt video active: $id")
         } catch (t: Throwable) {}
     }
@@ -1079,6 +1086,8 @@ class MainActivity : Activity() {
             quitYtFsQuiet()
             try { web.evaluateJavascript(WebBridge.mpvBufJs(false, 0), null) } catch (t: Throwable) {}
             lastYtBuf = false
+            ytResolveGeneration++
+            ytDiagnostic = ""
             ytVideoId = ""
             ytVideoState = 0
             ytVideoTry = 0
@@ -1119,17 +1128,20 @@ class MainActivity : Activity() {
             val q = if (h <= 144) 144 else if (h <= 240) 240 else 360
             if (q == ytQuality && mpvVideo.hasFrame()) return      // wahi quality pehle se
             val id = ytVideoId
-            if (id.isBlank() || ytVideoState != 2) { ytQuality = q; return }
+            if (id.isBlank() || ytVideoState != 2) {
+                ytQuality = q
+                if (id.isNotBlank() && ytVideoState == 1) beginYtVideo(id, ytLastPos, ytLastPlaying)
+                return
+            }
+            val generation = ++ytResolveGeneration
             val prevQ = ytQuality                                 // fail hua to isi par wapas
             ytQuality = q
-            val pos = mpvVideo.position()
-            val wasPlaying = !mpvVideo.isPaused()
-            showBanner("🎚️ Quality: ${q}p")
+            showBanner("🎚️ ${q}p + audio dhoond rahe hain…")
             ytResolver.execute {
                 val r = try { YtAudioSource.resolve(id, validate = false, preferHeight = q) } catch (t: Throwable) { null }
                 handoffHandler.post {
                     try {
-                        if (ytVideoId != id || ytVideoState != 2) return@post
+                        if (ytVideoId != id || ytVideoState != 2 || generation != ytResolveGeneration) return@post
                         if (r == null) {   // naya stream nahi mila -> purana hi chalta rahe
                             ytQuality = prevQ
                             showBanner("⚠️ ${q}p stream nahi mili — ${prevQ}p hi chal rahi hai")
@@ -1138,8 +1150,11 @@ class MainActivity : Activity() {
                         }
                         ytLastUrl = r.url
                         ytLastAudio = r.audioUrl
-                        mpvVideo.play(r.url, pos, startMuted = false)
-                        if (!r.audioUrl.isNullOrBlank()) mpvVideo.addAudio(r.audioUrl)
+                        val pos = mpvVideo.position()
+                        val wasPlaying = !mpvVideo.isPaused()
+                        ytDiagnostic = ""
+                        mpvVideo.play(r.url, pos, startMuted = false, audioUrl = r.audioUrl,
+                            userAgent = r.userAgent, referer = r.referer)
                         if (!wasPlaying) mpvVideo.pause()
                         web.evaluateJavascript(WebBridge.mpvQualityJs(q), null)
                         Log.i("MusicParty", "quality switch -> ${q}p @ $pos")
@@ -1151,6 +1166,15 @@ class MainActivity : Activity() {
 
     /** Slow net ya URL expire: position kuch der se nahi barhi -> dobara koshish; baar baar ho to page par wapas.
         (App tang nahi karta: MPV apni thread par chalta hai; ye sirf recovery hai.) */
+    private fun reportYtDiagnostic() {
+        val height = mpvVideo.actualHeight()
+        val audio = mpvVideo.audioCodec()
+        val label = if (height > 0) "MPV actual ${height}p · ${if (audio.isNotBlank()) audio else "audio waiting"}" else "MPV loading…"
+        if (label == ytDiagnostic) return
+        ytDiagnostic = label
+        try { web.evaluateJavascript(WebBridge.mpvTestStatusJs(label), null) } catch (_: Throwable) {}
+    }
+
     private fun checkYtStall() {
         try {
             if (ytVideoState != 2) return
@@ -1310,6 +1334,7 @@ class MainActivity : Activity() {
                         lastYtBuf = buf; lastYtBufPct = bpct
                         web.evaluateJavascript(WebBridge.mpvBufJs(buf, bpct), null)
                     }
+                    reportYtDiagnostic()
                     checkYtStall()   // video ruki hui hai? -> khud recovery
                 }
             } catch (t: Throwable) {}

@@ -1,8 +1,8 @@
-name: Build Music Watch Party APK (MPV lock-screen)
+name: Build v117 144p yt-dlp TEST (separate package)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ test/v117-144-ytdlp ]
   workflow_dispatch:
 
 permissions:
@@ -13,46 +13,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.11.1
-
-      - name: Build APK (MPV lock-screen + background audio)
+      - name: Verify pinned extractor
+        run: echo '1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6  app/src/main/res/raw/ytdlp' | sha256sum -c -
+      - name: Unit tests and separate-package APK
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-TEST2.apk
-          ls -lh Music-WP-117-TEST2.apk
-
-      - name: Upload APK (artifact)
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/*.apk Music-WP-117-144-YTDLP-TEST1.apk
+          ls -lh Music-WP-117-144-YTDLP-TEST1.apk
+      - name: Upload APK and test reports
         uses: actions/upload-artifact@v4
         with:
-          name: Music-Watch-Party-APK
-          path: Music-WP-117-TEST2.apk
-
-      - name: Release APK (download link)
-        if: github.ref == 'refs/heads/main'
+          name: Music-WP-117-144-YTDLP-TEST1
+          path: |
+            Music-WP-117-144-YTDLP-TEST1.apk
+            app/build/reports/tests/testDebugUnitTest/
+      - name: Publish isolated test APK (NOT original package)
+        if: github.ref == 'refs/heads/test/v117-144-ytdlp'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-test2
-          name: "Music Watch Party — v117 TEST2 (144/240 ab sach me 144/240 + volume + sync fix)"
+          tag_name: v117-144-ytdlp-test1
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          name: 'Music WP v117 — 144p yt-dlp TEST1 (separate app)'
           body: |
-            **Music-WP-117-TEST2.apk** — ye ek ALAG package hai (app.party.music.test)
+            Test only. Original app and existing TEST2 are NOT replaced.
+            Package: app.party.music.test144 · Label: Music WP 144 TEST
+            Version: 117-144-YTDLP-TEST1 (internal versionCode 119)
+            Android 7+ · arm64-v8a.
 
-            Is liye ye aapki mojooda "Music Watch Party" ke SATH install hoga
-            (usay chhedta nahi). Pehle test karo, sab theek lage to phir
-            original package se asli update bana kar denge.
+            - On-device yt-dlp 2026.08.19 with Python + QuickJS; no external extraction server.
+            - Default exact 144p plus audio. No silently relabeled 360p fallback.
+            - MPV receives video and audio atomically at load time.
+            - Test badge reports actual MPV video height and audio codec.
+            - Existing Party protocol, chat, play/pause/seek and background service retained.
+            - Headless extraction/MPV checks passed; real Android and mixed-version Party tests still required.
 
-            Naya kya hai:
-            - 🎚️ Quality button: 144p / 240p / 360p (ab 144/240 par ASLI 144/240 stream — data bachega)
-            - 🔊 Volume fix: call ke baad media volume 0 par bhi aawaz aane wala bug
-            - 🔄 Sync fix: dost ki play/pause/seek ab aapke MPV par bhi
-            - 🌐 Slow net: bara cache (96MB) + "⏳ Buffering %" + khud recovery
-            - 🎬 YouTube poora MPV par (video + audio) + fullscreen + lock screen
-          files: Music-WP-117-TEST2.apk
+            Use the supplied YouTube link, confirm `MPV actual 144p · aac` and audible sound,
+            then test pause/resume, seek, quality switches and Party sync.
+            No original-package final build is included.
+          files: Music-WP-117-144-YTDLP-TEST1.apk

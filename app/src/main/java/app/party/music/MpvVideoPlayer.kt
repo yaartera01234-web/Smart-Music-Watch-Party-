@@ -75,16 +75,24 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
     val error: String? get() = localError
 
     /** URL chalao (pos par). startMuted=true -> aawaz baad me kholi jayegi (double audio se bachne ke liye). */
-    fun play(url: String, pos: Double, startMuted: Boolean) {
+    fun play(url: String, pos: Double, startMuted: Boolean, audioUrl: String? = null,
+             userAgent: String = YtAudioSource.UA, referer: String? = null) {
         main.post {
             try {
                 val v = view ?: return@post
                 if (v.mpv == null) { localError = "core tayyar nahi"; return@post }
                 dispPos = -1.0
+                localError = null
                 v.muted = startMuted
                 v.paused = false
-                v.playFile(url)
-                main.postDelayed({ try { v.timePos = pos } catch (t: Throwable) {} }, 700L)
+                // MPV length-quoted option values protect URL commas/quotes. Attach audio
+                // during loadfile, not via a racing audio-add after video has started.
+                fun quoted(value: String) = "%${value.toByteArray(Charsets.UTF_8).size}%$value"
+                val options = mutableListOf("start=${if (pos.isFinite()) pos.coerceAtLeast(0.0) else 0.0}",
+                    "user-agent=" + quoted(userAgent), "audio-files-clr=")
+                if (!audioUrl.isNullOrBlank()) options += "audio-files-append=" + quoted(audioUrl)
+                if (!referer.isNullOrBlank()) options += "http-header-fields-append=" + quoted("Referer: $referer")
+                v.mpv?.command("loadfile", url, "replace", "-1", options.joinToString(","))
                 Log.i(TAG, "play (muted=$startMuted) pos=$pos")
             } catch (t: Throwable) {
                 localError = t.message
@@ -135,7 +143,10 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
     }
 
     /** Pehla frame aa gaya? (timePos null hota hai jab tak video shuru na ho) */
-    fun hasFrame(): Boolean = try { view != null && view?.mpv != null && view?.timePos != null } catch (t: Throwable) { false }
+    fun hasFrame(): Boolean = try { view != null && view?.mpv != null && view?.timePos != null && actualHeight() > 0 } catch (t: Throwable) { false }
+
+    fun actualHeight(): Int = try { view?.mpv?.get(MpvProperties.Height)?.getOrNull()?.toInt() ?: 0 } catch (_: Throwable) { 0 }
+    fun audioCodec(): String = try { view?.mpv?.get(MpvProperties.AudioCodecName)?.getOrNull().orEmpty() } catch (_: Throwable) { "" }
 
     fun show() { main.post { try { view?.visibility = View.VISIBLE } catch (t: Throwable) {} } }
     fun hide() { main.post { try { view?.visibility = View.INVISIBLE } catch (t: Throwable) {} } }
