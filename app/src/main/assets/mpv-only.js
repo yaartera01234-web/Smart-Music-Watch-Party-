@@ -3,7 +3,7 @@
   'use strict';
   if (window.__wpMpvOnly) return;
   window.__wpMpvOnly = true;
-  var player, readyCallback, notified=false;
+  var player, readyCallback, notified=false, incomingState=null;
   var s={id:'',t:0,d:0,playing:false,muted:false,ended:false,rev:0,quality:144};
   function native(name,args){try{if(window.YaarNative&&typeof window.YaarNative[name]==='function')window.YaarNative[name].apply(window.YaarNative,args);}catch(e){}}
   function refresh(){try{if(typeof updatePremiumVideoUI==='function')updatePremiumVideoUI();}catch(e){}}
@@ -17,8 +17,8 @@
   Player.prototype.loadVideoById=function(value,start){
     var id=typeof value==='string'?value:value&&value.videoId;
     if(!/^[A-Za-z0-9_-]{11}$/.test(id||''))return;
-    s.id=id;s.t=Math.max(0,Number((value&&value.startSeconds)||start)||0);s.d=0;s.playing=true;s.ended=false;s.rev++;
-    native('mpvOnlyLoad',[id,s.t,true,s.rev]);refresh();
+    s.id=id;s.t=Math.max(0,Number(incomingState?incomingState.time:((value&&value.startSeconds)||start))||0);s.d=0;s.playing=incomingState?!!incomingState.playing:true;s.ended=false;s.rev++;
+    native('mpvOnlyLoad',[id,s.t,s.playing,s.rev]);refresh();
   };
   Player.prototype.cueVideoById=function(value,start){this.loadVideoById(value,start);this.pauseVideo();};
   Player.prototype.playVideo=function(){s.playing=true;s.ended=false;command('play');};
@@ -52,6 +52,22 @@
   window.__wpOnlySuspend=function(){s.playing=false;refresh();};
   window.__wpOnlyQuality=function(q){s.quality=Number(q)||144;};
   window.__wpOnlyAttach=function(){
+    if(window.__wpOnlyAttached)return 'mpv-only-ready';window.__wpOnlyAttached=true;
+    var originalApply=window.applyState;
+    window.applyState=function(state){
+      if(!state||state.type!=='youtube')return originalApply.apply(this,arguments);
+      // Apply authoritative Party state atomically. Never reload an already-playing
+      // stream at zero just to seek it again 1.2 seconds later on catch-up.
+      if(!/^[A-Za-z0-9_-]{11}$/.test(state.videoId||''))return;
+      suppressYT=true;syncQuiet=Date.now()+1800;
+      if(s.id!==state.videoId||currentType!=='youtube'){
+        incomingState=state;try{loadVideoLocal(state,false);}finally{incomingState=null;}
+      }else{
+        player.seekTo(Math.max(0,Number(state.time)||0));
+        if(state.playing)player.playVideo();else player.pauseVideo();
+      }
+      setTimeout(function(){suppressYT=false;},1800);
+    };
     window.updateYouTubeQualityOptions=function(){
       var q=document.getElementById('premium-video-quality');if(!q)return;
       if(typeof currentType!=='undefined'&&currentType!=='youtube'){q.classList.add('hidden');return;}
