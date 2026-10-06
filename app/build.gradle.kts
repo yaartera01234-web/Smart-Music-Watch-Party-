@@ -8,12 +8,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.party.music.mpv023test" // Separate TEST app; never replaces original
+        applicationId = "app.party.music" // Original package; same signing key and data
         minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 127 // TEST ONLY
-        versionName = "117-MPV023-TEST1"
-        manifestPlaceholders["appLabel"] = "Party MPV023 TEST"
+        versionCode = 128 // Final original-package update
+        versionName = "117-MPV023-FINAL"
+        manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

@@ -1,6 +1,17 @@
-# MPV023 TEST1 — exact Synkplay Android v0.23.0 native engine experiment
+# MPV023 FINAL — exact Synkplay Android v0.23.0 native engine
 
-**TEST ONLY. Do not merge into the stable release or promote to latest.**
+**Final promotion authorized by the user on 2026-10-06.**
+
+## Final original-package release
+- Original `app.party.music`, label **Music Watch Party**, same `party.jks` signing key.
+- versionCode128 / versionName117-MPV023-FINAL; Android8+ / arm64-v8a.
+- Install over the original; do not uninstall. TEST package/data remain separate.
+- Built on the user's GitHub via `release/v117-mpv-final`, stable tag `v117-mpv023-final`.
+- Same pinned nine native libraries and source-identical rebuilt JNI as TEST1.
+- `app/src` remains byte-identical to original126; only identity/build packaging changes.
+- User requested final promotion; no explicit handset playback result is recorded here.
+
+The original TEST1 history below documents provenance, not the current final identity.
 
 The user reported that Synkplay v0.23.0 plays on their older device while the newer
 engine does not. This test changes the native engine, not the application's player

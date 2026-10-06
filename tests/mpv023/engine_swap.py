@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TEST ONLY: byte-exact Synkplay 0.23.0 native engine + source-identical rebuilt JNI.
+"""Byte-exact Synkplay 0.23.0 native engine + source-identical rebuilt JNI.
 Never modifies dex/resources/app logic. Output is UNSIGNED; align/re-sign afterwards.
 """
 import argparse, hashlib, json, pathlib, re, shutil, subprocess, tempfile, urllib.request, zipfile
@@ -108,7 +108,7 @@ def swap(work, base, output):
             else:data=src.read(info.filename)
             out.writestr(info,data)
     verify(work,base,output)
-    print('UNSIGNED TEST APK ready: align and re-sign before installation')
+    print('UNSIGNED APK ready: align and re-sign before installation')
 
 def verify(work, base, candidate):
     with zipfile.ZipFile(base) as src,zipfile.ZipFile(candidate) as out:
