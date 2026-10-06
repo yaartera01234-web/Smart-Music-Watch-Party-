@@ -36,6 +36,8 @@ jobs:
           node tests/sync-policy.cjs
           node tests/keyboard-gif-routing.cjs
           node tests/keyboard-gif-fallback.cjs
+      - name: Set up Android SDK and command-line tools
+        uses: android-actions/setup-android@v3
       - name: Prepare exact reference libraries and rebuild only the JNI adapter
         run: |
           sdkmanager 'ndk;29.0.14206865' 'build-tools;35.0.0'
