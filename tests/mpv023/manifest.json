@@ -1,0 +1,67 @@
+{
+  "synk_apk_url": "https://github.com/yuroyami/syncplay-mobile/releases/download/v0.23.0/synkplay-0.23.0-full-arm64-v8a.apk",
+  "synk_apk_sha256": "dfb29c5c68f1a84b436acd09f875b8e32dfa7ed0ae5a3688381ea8eac2ae3a7f",
+  "wrapper_commit": "b001dd97538e7d3e700df80029fd72be99ceba3f",
+  "ndk": "29.0.14206865",
+  "source_files": {
+    "jni/mpvkt.cpp": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/mpvkt.cpp",
+      "sha256": "89378a9e416d4ef42ae40d2bab857b4189af4869cf0f880bf7576332c9122844"
+    },
+    "jni/node_codec.cpp": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/node_codec.cpp",
+      "sha256": "243109b5927e85d24d945f3a89cedc714b1ae199815f1fe23637de1bd7e02a12"
+    },
+    "jni/node_codec.h": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/node_codec.h",
+      "sha256": "27f098d28dfe27a8fde22f0cac9c4d25baf77afb0e1d77645d0dee432242c9b5"
+    },
+    "jni/stream_cb.cpp": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/stream_cb.cpp",
+      "sha256": "8503b14f0c0449fba6fe62228b35b2474a58884d5f8fe8d3062d03d2662dae63"
+    },
+    "jni/stream_cb.h": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/stream_cb.h",
+      "sha256": "382a430d12e252038ee7594d8bd87e5f8bb04cbfb3627e0c53cf4fff0a891e70"
+    },
+    "jni/utf8.cpp": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/utf8.cpp",
+      "sha256": "f2297ec2712901c515f4c6d49ce08218a26f6cc0dce223f7e35d787a87c468f3"
+    },
+    "jni/utf8.h": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/libmpvkt-native/native/jni/utf8.h",
+      "sha256": "8b3ac83639a21bc8dbe629b2522eead426700fa7ca5845b11ab88c51c1d90e9b"
+    },
+    "include/mpv/client.h": {
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/c401ef9c3/include/mpv/client.h",
+      "sha256": "3c073236a09cb456c6e80587d5523c8771c32fb22ca014e0f99cc3d43905b75c"
+    },
+    "include/mpv/stream_cb.h": {
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/c401ef9c3/include/mpv/stream_cb.h",
+      "sha256": "188e58b6d14383e15a5dffdc4ecebbdfbf2e412b9c099ff21b571f747a8ce32d"
+    },
+    "include/libavcodec/jni.h": {
+      "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0540b42657/libavcodec/jni.h",
+      "sha256": "f98405ffb7ba26665cde92daef33bc4371c91aa6c85b522b36864ed289600ebc"
+    },
+    "LICENSE-libmpvKt": {
+      "url": "https://raw.githubusercontent.com/yuroyami/libmpvKt/b001dd97538e7d3e700df80029fd72be99ceba3f/LICENSE",
+      "sha256": "4ccfb7a136d50ec7542acbf2cccd9458104c9c666e25dd460ec3f65d580488a6"
+    },
+    "COPYING.GPLv3": {
+      "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0540b42657/COPYING.GPLv3",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    }
+  },
+  "native_libraries": {
+    "libmpv.so": "3bc13d46c234c3fb1d4c9317e14da4a679975665d2f84fe386ab7755eff3768b",
+    "libavcodec.so": "992f22780137e1194663291004a3a2907c534125b3826325c1904b87fbdf1d82",
+    "libavdevice.so": "9b025470bd4da1a42d44b24735f8b556abc18e2322596ab7294bb3dd467a8398",
+    "libavfilter.so": "ac6187175371f5edb3710f8c479ae1fb46bcdd3dcd38a78105b79278510d409f",
+    "libavformat.so": "6df3bd6292a8292e2d1c4ae6520879dbafa28b1231f5e9145643d4793da4c8c4",
+    "libavutil.so": "bc8cc1198f0ea8f99f51b60c720b3cc5d65e68b3375cfe50cafe63c9ff0531c6",
+    "libswresample.so": "f061e21a8b646c36c61025634e188435e78772722bd07227f79cf7382eed1bbc",
+    "libswscale.so": "abe7addea6d3a263d0309ead0200000cd2ba21e4c353d3afa60b197e56ac9e38",
+    "libc++_shared.so": "c4c2fe5cbcb1fba0003a31fc7ab29a9bb12df6cc187ec45a806462540e83d93b"
+  }
+}

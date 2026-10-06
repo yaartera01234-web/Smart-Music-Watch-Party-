@@ -8,12 +8,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.party.music"      // Original app update, same package and signing key
-        minSdk = 24
+        applicationId = "app.party.music.mpv023test" // Separate TEST app; never replaces original
+        minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 126                      // Keyboard GIF update; original package/signature
-        versionName = "117-GIF-AUTO"
-        manifestPlaceholders["appLabel"] = "Music Watch Party"
+        versionCode = 127 // TEST ONLY
+        versionName = "117-MPV023-TEST1"
+        manifestPlaceholders["appLabel"] = "Party MPV023 TEST"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
