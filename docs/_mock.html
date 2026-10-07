@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Activity Overlay — Sample (Watch Party)</title>
+<link rel="stylesheet" href="wp-activity.css" />
+<style>
+  :root { --wp-bg1: #0f0c29; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #fff;
+    background: linear-gradient(135deg, #0f0c29, #302b63 55%, #24243e);
+    padding: 16px 14px 40px;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 17px; margin: 0 0 4px; letter-spacing: .2px; }
+  .sub { font-size: 12px; color: rgba(255,255,255,.66); margin: 0 0 14px; line-height: 1.5; }
+  .sub b { color: #ff8fd0; }
+
+  /* ── mock player (asli page jaisa) ── */
+  .player-wrap { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+  .player-wrap.wp-html-fs { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; border: 0; z-index: 9999; aspect-ratio: auto; }
+  .player-wrap:fullscreen { border-radius: 0; border: 0; width: 100vw; height: 100vh; }
+
+  .fake-video { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(120% 90% at 30% 20%, #3a2a6a 0%, #130f2b 45%, #06040f 100%); }
+  .blob { position: absolute; border-radius: 50%; filter: blur(34px); opacity: .8; mix-blend-mode: screen; animation: drift 11s ease-in-out infinite alternate; }
+  .b1 { width: 46%; height: 70%; left: 8%; top: 10%; background: #ff5ebc; animation-duration: 10s; }
+  .b2 { width: 40%; height: 64%; right: 6%; top: 24%; background: #8b72ff; animation-duration: 13s; animation-delay: -4s; }
+  .b3 { width: 30%; height: 50%; left: 42%; bottom: -10%; background: #54e8ff; animation-duration: 9s; animation-delay: -2s; opacity: .55; }
+  .grain { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 3px); pointer-events: none; }
+  .scene { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.22); font-weight: 900; font-size: clamp(22px, 6vw, 56px); letter-spacing: 4px; text-transform: uppercase; pointer-events: none; }
+  @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(9%, -7%) scale(1.14); } }
+
+  #premium-video-ui { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; justify-content: space-between; padding: 12px 14px 10px; color: #fff; pointer-events: none; background: linear-gradient(180deg, rgba(4,4,14,.72), transparent 28%, transparent 59%, rgba(4,4,14,.86)); }
+  .premium-video-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .premium-video-badge { padding: 5px 9px; border: 1px solid rgba(255,255,255,.18); border-radius: 20px; color: #d9d4ff; background: rgba(16,13,38,.68); font-size: 9px; font-weight: 900; letter-spacing: 1.2px; white-space: nowrap; }
+  #premium-video-title { min-width: 0; overflow: hidden; color: rgba(255,255,255,.84); font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+  .premium-video-menu { margin-left: auto; width: 28px; height: 28px; padding: 0; border: 1px solid rgba(255,255,255,.18); border-radius: 9px; color: #fff; background: rgba(16,13,38,.68); font-size: 11px; pointer-events: auto; }
+  .premium-video-center { display: grid; place-items: center; flex: 1; transition: opacity .2s ease; }
+  #premium-video-ui.is-playing .premium-video-center { opacity: 0; }
+  #premium-video-big-play { display: grid; place-items: center; width: 58px; height: 58px; padding-left: 3px; border: 1px solid rgba(255,255,255,.32); border-radius: 50%; color: #fff; background: linear-gradient(135deg, rgba(255,94,188,.95), rgba(125,91,255,.95)); box-shadow: 0 0 0 9px rgba(255,255,255,.07), 0 13px 28px rgba(0,0,0,.4); font-size: 22px; pointer-events: auto; cursor: pointer; }
+  .premium-video-bottom { width: 100%; pointer-events: auto; }
+  .premium-video-progress { position: relative; height: 5px; border-radius: 10px; background: rgba(255,255,255,.25); cursor: pointer; }
+  .premium-video-fill { position: absolute; top:0; bottom:0; left:0; width: 0%; border-radius: inherit; background: linear-gradient(90deg, #ff5ebc, #8b72ff, #54e8ff); box-shadow: 0 0 12px rgba(255,94,188,.58); }
+  .premium-video-dot { position: absolute; top: 50%; left: 0%; width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: #ff5ebc; transform: translate(-50%,-50%); box-shadow: 0 0 10px rgba(255,94,188,.7); }
+  .premium-video-controls { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+  .premium-video-control { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 0; border-radius: 50%; color: #f1efff; background: rgba(14,12,31,.64); font-size: 12px; pointer-events: auto; cursor: pointer; }
+  #premium-video-play { color: #fff; background: linear-gradient(135deg, #ff5ebc, #8b72ff); }
+  #premium-video-time { color: #ddd9ed; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .premium-video-spacer { flex: 1; }
+  .q { height: 27px; padding: 0 7px; border: 1px solid rgba(255,255,255,.16); border-radius: 9px; color: #f1efff; background: rgba(14,12,31,.78); font-size: 9px; font-weight: 800; pointer-events: auto; }
+  @media (max-width: 500px) { #premium-video-ui { padding: 9px 10px 8px; } #premium-video-big-play { width: 50px; height: 50px; font-size: 19px; } }
+
+  /* ── demo controls ── */
+  .card { margin-top: 14px; padding: 12px 12px 10px; border-radius: 14px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); }
+  .card h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .6px; text-transform: uppercase; color: rgba(255,255,255,.6); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn { appearance: none; border: 1px solid rgba(255,255,255,.16); background: rgba(14,12,31,.78); color: #f1efff; font: 800 12px/1 system-ui, sans-serif; padding: 10px 12px; border-radius: 10px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .btn:active { transform: scale(.97); }
+  .btn.p { background: linear-gradient(135deg, #ff5ebc, #8b72ff); border-color: transparent; color: #150c26; }
+  .btn.o { background: linear-gradient(135deg, #ffb547, #ff7a59); border-color: transparent; color: #2b1400; }
+  .btn.g { background: linear-gradient(135deg, #3ddc97, #22b8cf); border-color: transparent; color: #052a22; }
+  .btn.v { background: linear-gradient(135deg, #8b72ff, #54e8ff); border-color: transparent; color: #0c0b2e; }
+  .btn.r { background: linear-gradient(135deg, #ff6b6b, #ff5ebc); border-color: transparent; color: #2b0a14; }
+  .name { height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.25); color: #fff; font: 700 12px system-ui, sans-serif; width: 120px; }
+  label.ck { display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: rgba(255,255,255,.8); cursor: pointer; }
+  .hint { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 8px; line-height: 1.5; }
+  .spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .spec div { padding: 9px 10px; border-radius: 10px; background: rgba(0,0,0,.22); font-size: 11.5px; line-height: 1.45; color: rgba(255,255,255,.78); }
+  .spec b { color: #fff; display: block; font-size: 11px; letter-spacing: .4px; text-transform: uppercase; margin-bottom: 2px; }
+  .blocked { display: none; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,181,71,.14); border: 1px solid rgba(255,181,71,.4); color: #ffd79a; font-size: 11.5px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>🎬 Player Activity Overlay — Sample</h1>
+  <p class="sub">Yeh <b>asli module</b> hai (same CSS + JS jo <code>party-final1.html</code> me jayega) — neeche mock player me chala kar dekhein. Toast <b>upper-left</b>, glass/blur, latest upar, ~3.5s baad fade-out. Video/controls block nahi hote.</p>
+
+  <!-- ══ MOCK PLAYER (asli page ke class/id names) ══ -->
+  <div class="player-wrap" id="wrap">
+    <div class="fake-video">
+      <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+      <div class="grain"></div>
+      <div class="scene">video</div>
+    </div>
+    <div id="premium-video-ui" class="is-playing">
+      <div class="premium-video-top"><span class="premium-video-badge">▶ YOUTUBE</span><span id="premium-video-title">YouTube · Coke Studio — Pasoori</span><button class="premium-video-menu">•••</button></div>
+      <div class="premium-video-center"><button id="premium-video-big-play" onclick="demo.toggle()">❚❚</button></div>
+      <div class="premium-video-bottom">
+        <div class="premium-video-progress" id="pb" onclick="demo.seekClick(event)"><div class="premium-video-fill" id="fill"></div><div class="premium-video-dot" id="dot"></div></div>
+        <div class="premium-video-controls">
+          <button class="premium-video-control" id="premium-video-play" onclick="demo.toggle()">❚❚</button>
+          <button class="premium-video-control" onclick="demo.seekBy(-10)">↺</button>
+          <button class="premium-video-control" onclick="demo.seekBy(10)">↻</button>
+          <span id="premium-video-time">00:00 / 00:00</span>
+          <span class="premium-video-spacer"></span>
+          <select class="q"><option>360p</option><option>240p</option><option>144p</option></select>
+          <button class="premium-video-control" title="Fullscreen" onclick="demo.fs()">⛶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>👥 Friend ki activity (MQTT se aayi)</h3>
+    <div class="row">
+      <button class="btn o" onclick="demo.friend('pause')">❚❚ Ahmed Paused</button>
+      <button class="btn v" onclick="demo.friend('seek')">⏩ Ahmed Seek +10s</button>
+      <button class="btn g" onclick="demo.friend('play')">▶ Ahmed Resumed</button>
+      <button class="btn r" onclick="WPActivity.show('Ahmed','leave')">👋 Ahmed Left</button>
+      <button class="btn p" onclick="WPActivity.show('Sara','join')">🎉 Sara Joined</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🙋 Meri activity (apna naam)</h3>
+    <div class="row">
+      <input class="name" id="me" value="Usman" maxlength="20" />
+      <button class="btn o" onclick="demo.me('pause')">❚❚ Maine Pause kiya</button>
+      <button class="btn v" onclick="demo.me('seek')">⏩ Maine Seek kiya</button>
+      <button class="btn g" onclick="demo.me('play')">▶ Maine Resume kiya</button>
+    </div>
+    <div class="hint">Player ke apne buttons (❚❚ / ↺ / ↻ / progress bar) bhi dabao — wahi toast aata hai jo asli page me <code>pubCmd()</code> hook se aayega.</div>
+  </div>
+
+  <div class="card">
+    <h3>⚙️ Rules / test</h3>
+    <div class="row">
+      <label class="ck"><input type="checkbox" id="fsOnly" onchange="demo.fsRule(this.checked)" /> Sirf fullscreen me dikhao <span style="opacity:.6">(asli page me ON hoga)</span></label>
+      <button class="btn" onclick="demo.fs()">⛶ Fullscreen</button>
+      <button class="btn" onclick="demo.auto()">▶ Auto demo (sequence)</button>
+      <button class="btn" onclick="demo.burst()">⚡ Stack test ×6</button>
+      <button class="btn" onclick="demo.dedup()">🔁 Dedup test</button>
+      <button class="btn" onclick="WPActivity.clear()">✕ Clear</button>
+    </div>
+    <div class="blocked" id="blocked">⛔ Fullscreen-only rule ON hai aur player fullscreen nahi — is liye toast nahi dikha (asli page ka behaviour). ⛶ Fullscreen dabao ya rule off karo.</div>
+  </div>
+
+  <div class="card">
+    <h3>📐 Spec</h3>
+    <div class="spec">
+      <div><b>Position</b>Upper-left, badge/title row ke neeche (top 46px)</div>
+      <div><b>Duration</b>3.5s, phir 320ms fade/slide-out → DOM se remove</div>
+      <div><b>Stack</b>Latest sab se upar · max 4 · purane auto-hat jaate hain</div>
+      <div><b>Dedup</b>Same naam + same action 2.5s me ek dafa (double-publish fix)</div>
+      <div><b>Time</b>Hamesha HH:MM:SS · APK me MPV ka time, browser me player ka</div>
+      <div><b>Safety</b>pointer-events: none · z-index 40 · wpfs-keep (APK FS CSS)</div>
+    </div>
+  </div>
+</div>
+
+<script src="wp-activity.js"></script>
+<script>
+/* ───────── demo-only: nakli player clock (asli page me localNow() / __wpMpvState hota hai) ───────── */
+(function () {
+  var pos = 14 * 60 + 50, dur = 61 * 60 + 12, playing = true, lastTick = Date.now();
+  window.localNow = function () { return pos; };                 // module isi ko parhta hai
+  function mmss(s) { s = Math.max(0, Math.floor(s)); var m = Math.floor(s / 60), x = s % 60; return (m < 10 ? '0' : '') + m + ':' + (x < 10 ? '0' : '') + x; }
+  function paint() {
+    var pct = Math.min(100, pos / dur * 100);
+    document.getElementById('fill').style.width = pct + '%';
+    document.getElementById('dot').style.left = pct + '%';
+    document.getElementById('premium-video-time').textContent = mmss(pos) + ' / ' + mmss(dur);
+    var ic = playing ? '❚❚' : '▶';
+    document.getElementById('premium-video-play').textContent = ic;
+    document.getElementById('premium-video-big-play').textContent = ic;
+    document.getElementById('premium-video-ui').classList.toggle('is-playing', playing);
+  }
+  setInterval(function () { var n = Date.now(); if (playing) pos = Math.min(dur, pos + (n - lastTick) / 1000); lastTick = n; paint(); }, 250);
+  paint();
+
+  var wrap = document.getElementById('wrap');
+  function me() { return (document.getElementById('me').value || 'Me').trim(); }
+  function note(ok) { document.getElementById('blocked').style.display = ok ? 'none' : 'block'; if (!ok) setTimeout(function () { document.getElementById('blocked').style.display = 'none'; }, 3500); }
+  function emit(name, kind, a, b) { note(WPActivity.show(name, kind, a, b)); }
+
+  window.demo = {
+    /* player ke apne controls -> meri activity (asli page: pubCmd hook) */
+    toggle: function () { playing = !playing; paint(); emit(me(), playing ? 'play' : 'pause', pos); },
+    seekBy: function (d) { var from = pos; pos = Math.max(0, Math.min(dur, pos + d)); paint(); emit(me(), 'seek', from, pos); },
+    seekClick: function (e) { var r = document.getElementById('pb').getBoundingClientRect(); var from = pos; pos = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * dur; paint(); emit(me(), 'seek', from, pos); },
+    me: function (k) { if (k === 'seek') demo.seekBy(10); else { playing = (k === 'play'); paint(); emit(me(), k, pos); } },
+    /* friend -> (asli page: applyCmd hook, naam c.by se) */
+    friend: function (k) {
+      if (k === 'seek') { var from = pos; pos = Math.min(dur, pos + 10); paint(); emit('Ahmed', 'seek', from, pos); }
+      else { playing = (k === 'play'); paint(); emit('Ahmed', k, pos); }
+    },
+    fsRule: function (on) { WPActivity.config.fullscreenOnly = !!on; },
+    fs: function () {
+      /* pehle asli Fullscreen API (browser v45 jaisa), na chale to CSS fullscreen (.wp-html-fs) */
+      if (document.fullscreenElement || wrap.classList.contains('wp-html-fs')) {
+        if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+        wrap.classList.remove('wp-html-fs');
+        return;
+      }
+      var req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+      var fallback = function () { wrap.classList.add('wp-html-fs'); };
+      if (!req) { fallback(); return; }
+      try { Promise.resolve(req.call(wrap)).catch(fallback); } catch (e) { fallback(); }
+    },
+    auto: function () {
+      var seq = [
+        function () { emit('Sara', 'join'); },
+        function () { demo.friend('pause'); },
+        function () { demo.friend('seek'); },
+        function () { demo.friend('play'); },
+        function () { demo.me('pause'); },
+        function () { demo.me('play'); },
+        function () { emit('Ahmed', 'leave'); }
+      ];
+      seq.forEach(function (fn, i) { setTimeout(fn, i * 1400); });
+    },
+    burst: function () {
+      var names = ['Ahmed', 'Sara', 'Bilal', 'Hina', 'Zain', 'Maha'], kinds = ['pause', 'seek', 'play', 'join', 'leave', 'pause'];
+      names.forEach(function (n, i) { setTimeout(function () { if (kinds[i] === 'seek') emit(n, 'seek', pos, pos + 25); else emit(n, kinds[i], pos); }, i * 220); });
+    },
+    dedup: function () { emit('Ahmed', 'pause', pos); setTimeout(function () { emit('Ahmed', 'pause', pos); }, 500); setTimeout(function () { emit('Ahmed', 'pause', pos); }, 900); }
+  };
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') wrap.classList.remove('wp-html-fs'); });
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (ev) { document.addEventListener(ev, function () { if (!document.fullscreenElement) wrap.classList.remove('wp-html-fs'); }); });
+
+  /* page khulte hi ek chhota demo */
+  setTimeout(function () { emit('Sara', 'join'); }, 700);
+  setTimeout(function () { demo.friend('pause'); }, 2000);
+  setTimeout(function () { demo.friend('seek'); }, 3400);
+  setTimeout(function () { demo.friend('play'); }, 4800);
+})();
+</script>
+</body>
+</html>

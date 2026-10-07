@@ -1,0 +1,397 @@
+<!-- WP_ACTIVITY_OVERLAY_V54: fullscreen player activity toasts (Paused / Resumed / Seek / Joined / Left).
+     Additive only — applyCmd / pubCmd / addSysMsg wrap hote hain, originals hamesha chalte hain.
+     Browser (web player + iframe) aur APK (MPV: body.wp-mpv-fs + __wpMpvState) dono. -->
+<style id="wp-activity-css">
+/* ═══════════════════════════════════════════════════════════════════════
+   WP ACTIVITY OVERLAY — player ke andar (upper-left) floating activity toasts
+   "Ahmed Paused · 00:15:00", "Ahmed Seek · 00:15:10 → 00:15:20", "Sara Joined"
+   - sirf fullscreen me (browser .wp-html-fs / .pp-fs / :fullscreen, APK body.wp-mpv-fs)
+   - pointer-events: none  -> video/controls kabhi block nahi hote
+   - class "wpfs-keep"     -> APK ka MPV-fullscreen CSS isay hide na kare
+   ═══════════════════════════════════════════════════════════════════════ */
+#wp-act-feed {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  top: 46px;                               /* badge/title wali top row ke neeche */
+  z-index: 40;                             /* premium UI (6) + pp-toast (15) + buffering (30) se upar */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: min(64%, 290px);
+  pointer-events: none;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+.wp-act {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  position: relative;
+  overflow: hidden;
+  max-width: 100%;
+  padding: 7px 12px 8px 8px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 9, 28, 0.58);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  color: #fff;
+  transform-origin: left center;
+  animation: wpActIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transition: opacity 0.32s ease, transform 0.32s ease;
+  will-change: transform, opacity;
+}
+.wp-act.out { opacity: 0; transform: translateX(-10px) scale(0.97); }
+.wp-act.pulse { animation: wpActPulse 0.32s ease; }
+
+.wp-act-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 900;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.wp-act.pause .wp-act-ic { background: linear-gradient(135deg, #ffb547, #ff7a59); color: #2b1400; }
+.wp-act.play  .wp-act-ic { background: linear-gradient(135deg, #3ddc97, #22b8cf); color: #052a22; padding-left: 2px; }
+.wp-act.seek  .wp-act-ic { background: linear-gradient(135deg, #8b72ff, #54e8ff); color: #0c0b2e; }
+.wp-act.join  .wp-act-ic { background: linear-gradient(135deg, #ff5ebc, #8b72ff); font-size: 13px; }
+.wp-act.leave .wp-act-ic { background: linear-gradient(135deg, #ff6b6b, #ff5ebc); font-size: 13px; }
+
+.wp-act-tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wp-act-t1 {
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wp-act-t1 b { font-weight: 900; color: #fff; }
+.wp-act-t1 span { color: rgba(255, 255, 255, 0.82); font-weight: 700; }
+.wp-act-t2 {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.66);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wp-act-t2 .arr { margin: 0 4px; color: #54e8ff; }
+
+/* life bar: kitna waqt bacha (subtle) */
+.wp-act-life {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, #ff5ebc, #8b72ff, #54e8ff);
+  opacity: 0.55;
+  transform-origin: left center;
+  animation: wpActLife var(--wp-act-ms, 3500ms) linear forwards;
+}
+
+@keyframes wpActIn {
+  from { opacity: 0; transform: translateX(-14px) scale(0.95); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes wpActLife { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@keyframes wpActPulse {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.04); box-shadow: 0 0 0 4px rgba(255, 94, 188, 0.22), 0 10px 28px rgba(0,0,0,.38); }
+  100% { transform: scale(1); }
+}
+
+/* mobile / chhoti screen */
+@media (max-width: 500px) {
+  #wp-act-feed { left: max(9px, env(safe-area-inset-left, 0px)); top: 40px; gap: 5px; max-width: min(70%, 240px); }
+  .wp-act { padding: 6px 10px 7px 7px; border-radius: 11px; gap: 8px; }
+  .wp-act-ic { width: 23px; height: 23px; font-size: 10px; }
+  .wp-act-t1 { font-size: 11.5px; }
+  .wp-act-t2 { font-size: 10px; }
+}
+
+/* APK: MPV fullscreen me player ke bachon ko hide karne wala rule — hum (wpfs-keep) bache rahen */
+body.wp-mpv-fs #wp-act-feed { display: flex !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-act { animation: none; transition: opacity 0.2s ease; }
+  .wp-act.out { transform: none; }
+}
+</style>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   WP ACTIVITY OVERLAY — JS (wahi module jo asli page me jayega)
+
+   API:
+     WPActivity.show(name, kind, a, b)
+        kind = 'pause' | 'play' | 'seek' | 'join' | 'leave'
+        pause/play : a = time (sec)
+        seek       : a = from (sec), b = to (sec)
+        join/leave : (time nahi)
+     WPActivity.fmt(sec)        -> "00:15:10"  (hamesha HH:MM:SS)
+     WPActivity.isFullscreen()  -> browser (.wp-html-fs / .pp-fs / :fullscreen) ya APK (body.wp-mpv-fs)
+     WPActivity.now()           -> current position: APK MPV (__wpMpvState.t) warna page ka localNow()
+
+   Rules:
+     - sirf fullscreen me dikhta hai (config.fullscreenOnly)
+     - same naam + same action 2.5s me ek dafa (double-publish dedup)
+     - latest sab se upar, max 4 stack, har toast ~3.5s, phir fade-out + remove
+     - pointer-events none -> playback / controls kabhi block nahi
+   ═══════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  if (window.WPActivity) return;
+
+  var cfg = { duration: 3500, dedupMs: 2500, max: 4, fullscreenOnly: true };
+  var last = {};            // "name|kind" -> timestamp (dedup)
+  var lastEl = {};          // "name|kind" -> element (dedup par pulse)
+
+  function wrap() { return document.querySelector('.player-wrap'); }
+
+  function fmt(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(h) + ':' + p(m) + ':' + p(s);
+  }
+
+  function isFullscreen() {
+    try {
+      var w = wrap();
+      if (!w) return false;
+      if (document.body && document.body.classList.contains('wp-mpv-fs')) return true;        // APK: MPV fullscreen
+      if (w.classList.contains('wp-html-fs') || w.classList.contains('pp-fs')) return true;    // browser: v45 / v36
+      var el = document.fullscreenElement || document.webkitFullscreenElement || document.webkitCurrentFullScreenElement;
+      return !!el && (el === w || w.contains(el));
+    } catch (e) { return false; }
+  }
+
+  function now() {
+    try {   /* APK MPV mode: asli time MPV ka hai (bridge har 450ms __wpMpvState set karta hai) */
+      var S = window.__wpMpvState;
+      if (window.__wpMpvLinked && S && (Date.now() - (S.at || 0)) < 3000) return Number(S.t) || 0;
+    } catch (e) {}
+    try { if (typeof window.localNow === 'function') return Number(window.localNow()) || 0; } catch (e) {}
+    return 0;
+  }
+
+  function feed() {
+    var w = wrap();
+    if (!w) return null;
+    var f = document.getElementById('wp-act-feed');
+    if (!f) {
+      f = document.createElement('div');
+      f.id = 'wp-act-feed';
+      f.className = 'wpfs-keep';            // APK ke MPV-fullscreen CSS se bachne ke liye
+      f.setAttribute('aria-live', 'polite');
+      w.appendChild(f);
+    } else if (f.parentNode !== w) {
+      w.appendChild(f);
+    }
+    return f;
+  }
+
+  var ICON = { pause: '❚❚', play: '▶', seek: '⏩', join: '🎉', leave: '👋' };
+  var WORD = { pause: 'Paused', play: 'Resumed', seek: 'Seek', join: 'Joined', leave: 'Left' };
+
+  function remove(el) {
+    if (!el || el.__gone) return;
+    el.__gone = true;
+    el.classList.add('out');
+    setTimeout(function () { try { el.parentNode && el.parentNode.removeChild(el); } catch (e) {} }, 360);
+  }
+
+  function show(name, kind, a, b) {
+    try {
+      kind = String(kind || '');
+      if (kind === 'resume') kind = 'play';
+      if (!WORD[kind]) return false;
+      if (cfg.fullscreenOnly && !isFullscreen()) return false;
+      name = String(name || 'Someone').trim().slice(0, 20) || 'Someone';
+
+      /* dedup: wahi banda, wahi action, 2.5s ke andar -> dobara nahi (sirf halka pulse) */
+      var key = name.toLowerCase() + '|' + kind;
+      var t = Date.now();
+      if (last[key] && (t - last[key]) < cfg.dedupMs) {
+        var pe = lastEl[key];
+        if (pe && !pe.__gone) { pe.classList.remove('pulse'); void pe.offsetWidth; pe.classList.add('pulse'); }
+        return false;
+      }
+      last[key] = t;
+
+      var f = feed();
+      if (!f) return false;
+
+      var el = document.createElement('div');
+      el.className = 'wp-act ' + kind;
+      el.style.setProperty('--wp-act-ms', cfg.duration + 'ms');
+
+      var line2 = '';
+      if (kind === 'seek') {
+        var from = Number(a), to = Number(b);
+        if (isFinite(from) && isFinite(to)) line2 = fmt(from) + '<span class="arr">→</span>' + fmt(to);
+        else if (isFinite(to)) line2 = fmt(to);
+        else if (isFinite(from)) line2 = fmt(from);
+      } else if (kind === 'pause' || kind === 'play') {
+        if (a !== undefined && a !== null && isFinite(Number(a))) line2 = fmt(a);
+      }
+
+      el.innerHTML =
+        '<div class="wp-act-ic">' + ICON[kind] + '</div>' +
+        '<div class="wp-act-tx">' +
+          '<div class="wp-act-t1"><b></b> <span>' + WORD[kind] + '</span></div>' +
+          (line2 ? '<div class="wp-act-t2">' + line2 + '</div>' : '') +
+        '</div>' +
+        '<div class="wp-act-life"></div>';
+      el.querySelector('.wp-act-t1 b').textContent = name;   // naam textContent se (HTML-safe)
+
+      f.insertBefore(el, f.firstChild);                      // latest sab se UPAR
+      lastEl[key] = el;
+
+      /* zyada ho gaye -> sab se purane hatao */
+      var kids = f.querySelectorAll('.wp-act:not(.out)');
+      for (var i = cfg.max; i < kids.length; i++) remove(kids[i]);
+
+      setTimeout(function () { remove(el); }, cfg.duration);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function clear() {
+    var f = document.getElementById('wp-act-feed');
+    if (!f) return;
+    var kids = f.querySelectorAll('.wp-act');
+    for (var i = 0; i < kids.length; i++) remove(kids[i]);
+  }
+
+  window.WPActivity = { show: show, fmt: fmt, isFullscreen: isFullscreen, now: now, clear: clear, config: cfg };
+})();
+/* ═══════════════════════════════════════════════════════════════════════
+   WP ACTIVITY OVERLAY — HOOKS (existing sync system se jodna; koi naya sync logic nahi)
+
+   Sab kuch ADDITIVE hai: originals hamesha call hote hain. 3 wrappers:
+     1) window.applyCmd  -> FRIEND ke play/pause/seek  (naam payload ke c.by se)
+     2) window.pubCmd    -> MERE  play/pause/seek      (naam myName)
+     3) window.addSysMsg -> "X Joined Party 🎉" / "X Left 👋" (page ka wpEvOnce dedup pehle se)
+   Placement: WP_BROWSER_SYNC_V44 se PEHLE — taake browser ka sync-controller hamare upar wrap ho
+   (uske epoch/media filters pehle chalen, hum sirf wahi dekhein jo waqai apply hua).
+   APK me V44 skip hota hai -> onMsg -> hum -> base. MPV time __wpMpvState se.
+   ═══════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  var A = window.WPActivity;
+  if (!A || window.__wpActHooked) return;
+  window.__wpActHooked = 1;
+
+  /* ── seek "from" (apni seek ke liye): control dabne par position record ── */
+  var seekFromPos = -1, seekFromAt = 0, hist = [];
+  function rec() { try { seekFromPos = A.now(); seekFromAt = Date.now(); } catch (e) {} }
+  setInterval(function () {
+    try { hist.push({ at: Date.now(), pos: A.now() }); if (hist.length > 8) hist.shift(); } catch (e) {}
+  }, 500);
+  function seekFrom(target) {
+    var now = Date.now();
+    if (seekFromPos >= 0 && now - seekFromAt < 2500) { var f = seekFromPos; seekFromPos = -1; return f; }
+    try {   /* YouTube poll: lastYtTime abhi bhi PURANA sample hota hai (publish ke baad update hota hai) */
+      if (typeof lastYtTime === 'number' && lastYtTime > 0 && Math.abs(lastYtTime - target) > 1) return lastYtTime;
+    } catch (e) {}
+    for (var i = hist.length - 1; i >= 0; i--) {   /* fallback: aakhri sample jo target se alag ho */
+      if (now - hist[i].at < 3000 && Math.abs(hist[i].pos - target) > 1.5) return hist[i].pos;
+    }
+    return NaN;
+  }
+
+  /* 1) FRIEND: applyCmd — wahi sanity checks jo base me hain (cmdTime / saneSeek), phir toast */
+  try {
+    var oldApply = window.applyCmd;
+    if (typeof oldApply === 'function' && !oldApply.__wpAct) {
+      var wa = function (c) {
+        try {
+          if (c && (c.action === 'play' || c.action === 'pause' || c.action === 'seek')) {
+            var t = (typeof window.cmdTime === 'function') ? window.cmdTime(c)
+                  : (isFinite(Number(c.time)) && Number(c.time) >= 0 ? Number(c.time) : null);
+            if (t !== null) {
+              var who = c.by || 'Someone';
+              if (c.action === 'seek') {
+                var ok = (typeof window.saneSeek === 'function') ? window.saneSeek(t) : true;
+                if (ok) A.show(who, 'seek', A.now(), t);          /* from = apply se PEHLE ki apni position */
+              } else {
+                A.show(who, c.action, t);
+              }
+            }
+          }
+        } catch (e) {}
+        return oldApply.apply(this, arguments);
+      };
+      wa.__wpAct = 1;
+      window.applyCmd = wa;
+    }
+  } catch (e) {}
+
+  /* 2) MAIN: pubCmd — jo command waqai bheji ja rahi hai usi par toast */
+  try {
+    var oldPub = window.pubCmd;
+    if (typeof oldPub === 'function' && !oldPub.__wpAct) {
+      var wp = function (action, extra) {
+        try {
+          if (action === 'play' || action === 'pause' || action === 'seek') {
+            var nm = 'Me';
+            try { if (typeof myName === 'string' && myName) nm = myName; } catch (e) {}
+            var tm = Number(extra && extra.time);
+            if (window.__wpMpvLinked) tm = A.now();              /* APK: screen par MPV ka time hai */
+            if (action === 'seek') A.show(nm, 'seek', seekFrom(tm), tm);
+            else A.show(nm, action, tm);
+          }
+        } catch (e) {}
+        return oldPub.apply(this, arguments);
+      };
+      wp.__wpAct = 1;
+      window.pubCmd = wp;
+    }
+  } catch (e) {}
+
+  /* 3) JOIN / LEFT: page ke sys-message text se (teenon "Left" sites + "Joined" site cover) */
+  try {
+    var oldSys = window.addSysMsg;
+    if (typeof oldSys === 'function' && !oldSys.__wpAct) {
+      var ws = function (text) {
+        try {
+          var s = String(text || ''), m;
+          if ((m = /^(.+) Joined Party 🎉$/.exec(s))) A.show(m[1], 'join');
+          else if ((m = /^(.+) Left 👋$/.exec(s))) A.show(m[1], 'leave');
+        } catch (e) {}
+        return oldSys.apply(this, arguments);
+      };
+      ws.__wpAct = 1;
+      window.addSysMsg = ws;
+    }
+  } catch (e) {}
+
+  /* seek-from recorder: SAB scripts (V44 userSeek / APK bridge) ke baad lagao, taake outermost rahe */
+  setTimeout(function () {
+    try {
+      var o = window.premiumSeekBy;
+      if (typeof o === 'function' && !o.__wpAct) {
+        var f = function () { rec(); return o.apply(this, arguments); };
+        f.__wpAct = 1; window.premiumSeekBy = f;
+      }
+    } catch (e) {}
+    try {
+      var pb = document.getElementById('premium-video-progress');
+      if (pb && typeof pb.onclick === 'function' && !pb.onclick.__wpAct) {
+        var oc = pb.onclick;
+        var g = function () { rec(); return oc.apply(this, arguments); };
+        g.__wpAct = 1; pb.onclick = g;
+      }
+    } catch (e) {}
+  }, 0);
+})();
+</script>
