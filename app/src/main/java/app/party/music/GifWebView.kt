@@ -1,102 +1,123 @@
 package app.party.music
 
+import android.app.Activity
 import android.content.Context
-import android.net.Uri
 import android.os.Build
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.webkit.WebView
 import androidx.core.view.inputmethod.EditorInfoCompat
 import androidx.core.view.inputmethod.InputConnectionCompat
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.UUID
+import org.json.JSONTokener
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
-/**
- * WebView jo Gboard ke GIF/sticker bhejne ko support karta hai.
- *
- * Wajah: Android me keyboard kisi bhi field me GIF/sticker sirf tab bhejta hai jab wo field
- * khud ko "main image/gif le sakta hoon" declare kare (contentMimeTypes) aur commitContent
- * sambhale. Plain WebView ye declare nahi karta, is liye Gboard "GIF not supported" dikhata hai.
- * Yahan hum apna InputConnection wrapper laga kar wo support dete hain, phir GIF ko upload kar
- * ke chat me bhej dete hain (page ka window.wpSendGif hook).
- */
+/** Rich keyboard images only. Built-in GIF links and playback are unaffected. */
 class GifWebView(context: Context) : WebView(context) {
+    var onGif: ((String, String) -> Unit)? = null
+    var onGifError: ((String) -> Unit)? = null
+    private val busy = AtomicBoolean(false)
 
-    var onGif: ((String) -> Unit)? = null          // upload hokar URL mil gaya
-    var onGifError: ((String) -> Unit)? = null     // upload / read fail
+    companion object {
+        // Mirrors wpSendGif routing, but requires an active conversation. Include a page nonce
+        // so a reload cannot accidentally send an old upload into a newly opened conversation.
+        const val DESTINATION_JS = """(function(){try{
+          if(!window.__wpKeyboardGifPage)window.__wpKeyboardGifPage=Date.now()+':'+Math.random();
+          var sheet=document.getElementById('dm-sheet'),cv=document.getElementById('dm-view-chat');
+          if(sheet&&sheet.classList.contains('on')){
+            if(cv&&cv.classList.contains('on')&&window.DM&&typeof DM._curChat==='function'&&DM._curChat())
+              return JSON.stringify([window.__wpKeyboardGifPage,'dm',DM._curChat()]);
+            return '';
+          }
+          if(window.wpRoomJoined&&window.wpRoomJoined()&&typeof TP!=='undefined'&&TP.chat)
+            return JSON.stringify([window.__wpKeyboardGifPage,'room',TP.chat]);
+          return '';
+        }catch(e){return '';}})()"""
+    }
+
+    private fun alive(): Boolean {
+        val activity = context as? Activity
+        return isAttachedToWindow && (activity == null || (!activity.isFinishing && !activity.isDestroyed))
+    }
+    private fun finish(message: String? = null) {
+        busy.set(false)
+        post { if (alive() && message != null) onGifError?.invoke(message) }
+    }
+    private fun destination(callback: (String) -> Unit) {
+        if (!alive()) { callback("");return }
+        val pending=AtomicBoolean(true)
+        val timeout=Runnable { if(pending.compareAndSet(true,false)) callback("") }
+        postDelayed(timeout,5000)
+        try {
+            evaluateJavascript(DESTINATION_JS) { result ->
+                if(pending.compareAndSet(true,false)) {
+                    removeCallbacks(timeout)
+                    val value=try { JSONTokener(result ?: "null").nextValue() as? String ?: "" } catch (_: Exception) { "" }
+                    callback(value)
+                }
+            }
+        } catch (_: Exception) {
+            removeCallbacks(timeout)
+            if(pending.compareAndSet(true,false)) callback("")
+        }
+    }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val ic = super.onCreateInputConnection(outAttrs) ?: return null
-        EditorInfoCompat.setContentMimeTypes(
-            outAttrs,
-            arrayOf("image/gif", "image/png", "image/jpeg", "image/webp")
-        )
-        return InputConnectionCompat.createWrapper(ic, outAttrs) { info, flags, _ ->
-            if (Build.VERSION.SDK_INT >= 25 &&
-                (flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION) != 0
-            ) {
-                try {
-                    info.requestPermission()
-                } catch (t: Throwable) {
-                    return@createWrapper false
+        EditorInfoCompat.setContentMimeTypes(outAttrs,arrayOf("image/gif","image/png","image/jpeg","image/webp"))
+        return InputConnectionCompat.createWrapper(ic,outAttrs) { info,flags,_ ->
+            if (!busy.compareAndSet(false,true)) {
+                return@createWrapper true
+            }
+            val permission = AtomicBoolean(false)
+            fun release() { if (permission.compareAndSet(true,false)) try { info.releasePermission() } catch (_: Exception) {} }
+            if (Build.VERSION.SDK_INT >= 25 && (flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION) != 0) {
+                try { info.requestPermission();permission.set(true) }
+                catch (_: Exception) { finish("♡ GIF khul nahi saki — dobara select karein.");return@createWrapper true }
+            }
+            // Capture routing on the UI thread before reading/uploading. destination() has a
+            // timeout, so even an unresponsive renderer cannot retain the provider grant forever.
+            post {
+                destination { target ->
+                    if (target.isEmpty()) { release();finish("♡ GIF bhejne ke liye pehle chat kholein.") }
+                    else thread(name="wp-keyboard-image") {
+                        val bytes = try {
+                            context.contentResolver.openInputStream(info.contentUri)?.use { KeyboardGifUpload.readBounded(it) }
+                                ?: throw KeyboardGifUpload.Failure("Keyboard image open nahi hui")
+                        } catch (e: Exception) {
+                            finish(if (e is KeyboardGifUpload.Failure && e.detail.contains("12 MiB")) "♡ GIF thori bari hai — chhoti GIF select karein." else "♡ GIF khul nahi saki — dobara select karein.");null
+                        } finally { release() }
+                        if (bytes != null) {
+                            val format = try { KeyboardGifUpload.format(bytes) } catch(e: Exception) { finish("♡ Yeh image khul nahi saki — doosri select karein.");null }
+                            if (format != null) upload(bytes,format,target,false)
+                        }
+                    }
                 }
             }
-            val uri: Uri = info.contentUri
-            val desc = info.description
-            val mime = if (desc != null && desc.mimeTypeCount > 0) desc.getMimeType(0) else "image/gif"
-            thread { handle(uri, mime) }
             true
         }
     }
 
-    private fun handle(uri: Uri, mime: String) {
+    /** Original host once, then backup once. No popup or intermediate status. */
+    private fun upload(bytes: ByteArray, format: KeyboardGifUpload.Format, target: String, backup: Boolean) {
         try {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes == null || bytes.isEmpty()) {
-                post { onGifError?.invoke("GIF khali tha") }
-                return
+            val link=if(backup) KeyboardGifUpload.backup(bytes,format) else KeyboardGifUpload.primary(bytes,format)
+            post {
+                if (alive()) onGif?.invoke(link,target)
+                finish()
             }
-            val link = upload(bytes, mime)
-            if (link != null) post { onGif?.invoke(link) }
-            else post { onGifError?.invoke("GIF upload nahi hua — net check karein") }
-        } catch (t: Throwable) {
-            post { onGifError?.invoke("GIF padha nahi ja saka") }
+        } catch(e: Exception) {
+            if(backup) finish("♡ GIF nahi ja saki — ek baar phir koshish karein.")
+            else post { startBackup(bytes,format,target) }
         }
     }
 
-    /** litterbox (catbox ka temporary server): 72 ghante ka link, CORS khula, mobile/datacenter dono se chalta hai. */
-    private fun upload(bytes: ByteArray, mime: String): String? {
-        val boundary = "----wp" + UUID.randomUUID().toString().replace("-", "")
-        val conn = (URL("https://litterbox.catbox.moe/resources/internals/api.php")
-            .openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 20000
-            readTimeout = 90000
-            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-        }
-        try {
-            conn.outputStream.use { out ->
-                fun partHeader(name: String, value: String) {
-                    out.write(("--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n").toByteArray())
-                }
-                partHeader("reqtype", "fileupload")
-                partHeader("time", "72h")
-                out.write(("--$boundary\r\nContent-Disposition: form-data; name=\"fileToUpload\"; " +
-                        "filename=\"wp_${System.currentTimeMillis()}.gif\"\r\nContent-Type: $mime\r\n\r\n").toByteArray())
-                out.write(bytes)
-                out.write("\r\n".toByteArray())
-                out.write(("--$boundary--\r\n").toByteArray())
-            }
-            if (conn.responseCode !in 200..299) return null
-            val body = conn.inputStream.bufferedReader().readText().trim()
-            return if (body.startsWith("http")) body else null
-        } catch (t: Throwable) {
-            return null
-        } finally {
-            conn.disconnect()
+    // User-authorized silent fallback; re-check the destination before uploading elsewhere.
+    private fun startBackup(bytes: ByteArray, format: KeyboardGifUpload.Format, target: String) {
+        if (!alive()) { finish();return }
+        destination { current ->
+            if(current!=target || !alive()) { finish("♡ Chat badal gayi — GIF dobara select karein.");return@destination }
+            thread(name="wp-keyboard-backup") { upload(bytes,format,target,true) }
         }
     }
 }

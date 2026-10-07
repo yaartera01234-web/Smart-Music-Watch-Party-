@@ -129,6 +129,10 @@ class BgNotifyService : Service() {
                 override fun onJsPrompt(v: WebView?, u: String?, msg: String?, d: String?, r: JsPromptResult): Boolean { r.cancel(); return true }
             }
             w.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? {
+                    if (request == null || request.isForMainFrame) return null
+                    return MpvOnlyWeb.response(this@BgNotifyService, request.url.toString())
+                }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     lastPing = System.currentTimeMillis()
                     try {

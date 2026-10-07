@@ -1,58 +1,100 @@
-name: Build Music Watch Party APK (MPV lock-screen)
+name: MPV023 FINAL — original package, exact Synkplay 0.23.0 engine
 
 on:
   push:
-    branches: [ main ]
+    branches: [ release/v117-mpv-final ]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  final-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.11.1
-
-      - name: Build APK (MPV lock-screen + background audio)
-        run: |
-          chmod +x ./gradlew
-          ./gradlew :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/*.apk Music-WP-117-TEST2.apk
-          ls -lh Music-WP-117-TEST2.apk
-
-      - name: Upload APK (artifact)
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: Music-Watch-Party-APK
-          path: Music-WP-117-TEST2.apk
-
-      - name: Release APK (download link)
-        if: github.ref == 'refs/heads/main'
+          node-version: '20'
+      - name: Original identity and unchanged app logic
+        run: |
+          git diff --exit-code d33ade5919b205b8c457a1281c15d4715db8b39e -- app/src
+          grep -F 'applicationId = "app.party.music"' app/build.gradle.kts
+          grep -F 'versionName = "117-MPV023-FINAL"' app/build.gradle.kts
+          echo '1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6  app/src/main/res/raw/ytdlp' | sha256sum -c -
+      - name: Existing regression checks
+        run: |
+          node tests/sync-policy.cjs
+          node tests/keyboard-gif-routing.cjs
+          node tests/keyboard-gif-fallback.cjs
+      - name: Set up Android SDK and command-line tools
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Prepare exact reference libraries and rebuild only the JNI adapter
+        run: |
+          sdkmanager 'ndk;29.0.14206865' 'build-tools;35.0.0'
+          python tests/mpv023/engine_swap.py prepare --work /tmp/mpv023
+          python tests/mpv023/engine_swap.py build --work /tmp/mpv023 --ndk "$ANDROID_HOME/ndk/29.0.14206865"
+      - name: Build original-package base and JVM tests
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      - name: Substitute exact native bundle, align and sign original-package APK
+        run: |
+          set -euo pipefail
+          SDK="$ANDROID_HOME/build-tools/35.0.0"
+          BASE=app/build/outputs/apk/debug/app-debug.apk
+          APK=Music-Watch-Party-117-MPV023-FINAL.apk
+          "$SDK/aapt" dump badging "$BASE" | grep -F "package: name='app.party.music' versionCode='128' versionName='117-MPV023-FINAL'"
+          python tests/mpv023/engine_swap.py swap --work /tmp/mpv023 --base "$BASE" --output /tmp/mpv023/unsigned.apk
+          "$SDK/zipalign" -P 16 -f 4 /tmp/mpv023/unsigned.apk /tmp/mpv023/aligned.apk
+          "$SDK/apksigner" sign --ks keystore/party.jks --ks-key-alias party --ks-pass pass:party123 --key-pass pass:party123 --out "$APK" /tmp/mpv023/aligned.apk
+          "$SDK/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/mpv023/signature.txt
+          grep -F '842e2d5518d28a1d0c3aff8a16646cead9c58a619884a21a6a41792c04bffb33' /tmp/mpv023/signature.txt
+          "$SDK/zipalign" -c -P 16 4 "$APK"
+          python tests/mpv023/engine_swap.py verify --work /tmp/mpv023 --base "$BASE" --output "$APK"
+          "$SDK/aapt" dump badging "$APK" | grep -F "package: name='app.party.music' versionCode='128' versionName='117-MPV023-FINAL'"
+          sha256sum "$APK" > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Music-Watch-Party-MPV023-FINAL
+          path: |
+            Music-Watch-Party-117-MPV023-FINAL.apk
+            SHA256SUMS.txt
+            tests/mpv023/manifest.json
+            tests/mpv023/README.md
+            app/build/reports/tests/testDebugUnitTest/
+      - name: Publish approved original-package final
+        if: github.ref == 'refs/heads/release/v117-mpv-final'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-test2
-          name: "Music Watch Party — v117 TEST2 (144/240 ab sach me 144/240 + volume + sync fix)"
+          tag_name: v117-mpv023-final
+          target_commitish: ${{ github.sha }}
+          prerelease: false
+          make_latest: true
+          name: 'Music Watch Party 117 — MPV023 FINAL'
           body: |
-            **Music-WP-117-TEST2.apk** — ye ek ALAG package hai (app.party.music.test)
-
-            Is liye ye aapki mojooda "Music Watch Party" ke SATH install hoga
-            (usay chhedta nahi). Pehle test karo, sab theek lage to phir
-            original package se asli update bana kar denge.
-
-            Naya kya hai:
-            - 🎚️ Quality button: 144p / 240p / 360p (ab 144/240 par ASLI 144/240 stream — data bachega)
-            - 🔊 Volume fix: call ke baad media volume 0 par bhi aawaz aane wala bug
-            - 🔄 Sync fix: dost ki play/pause/seek ab aapke MPV par bhi
-            - 🌐 Slow net: bara cache (96MB) + "⏳ Buffering %" + khud recovery
-            - 🎬 YouTube poora MPV par (video + audio) + fullscreen + lock screen
-          files: Music-WP-117-TEST2.apk
+            Approved FINAL update: original app.party.music / Music Watch Party.
+            versionCode128 / 117-MPV023-FINAL. Same original signing certificate.
+            Install over the original app; do NOT uninstall it. Original app data is retained.
+            Android 8+ / arm64-v8a only (required by this native bundle).
+            Exact nine native libraries from Synkplay Android v0.23.0 release:
+            MPV v0.41.0-252-gc401ef9c3 / FFmpeg N-123143-g0540b42657.
+            Existing Kotlin wrapper retained; unmodified JNI adapter source rebuilt
+            against the matching FFmpeg62 ABI. Not a copy of Synkplay's full player.
+            App source, resolver, sync, controls, GIF, calls and lifecycle unchanged.
+            Published after user authorization; build checks do not prove handset playback.
+            Provenance, pinned sources and GPL notices: tests/mpv023 in repository.
+          files: |
+            Music-Watch-Party-117-MPV023-FINAL.apk
+            SHA256SUMS.txt

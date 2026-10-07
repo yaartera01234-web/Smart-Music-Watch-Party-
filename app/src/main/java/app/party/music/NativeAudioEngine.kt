@@ -62,12 +62,12 @@ class NativeAudioEngine(private val appContext: Context) {
 
             // ---- network / cache hardening
             mpv.setOption("cache", "yes")
-            mpv.setOption("cache-secs", "60")
+            mpv.setOption("cache-secs", "86400")
             // build 9: cache bharne ka intezar kam -> gaana jaldi shuru
             mpv.setOption("cache-pause-wait", "0.2")
-            mpv.setOption("demuxer-readahead-secs", "60")
-            mpv.setOption("demuxer-max-bytes", "67108864")      // 64 MB
-            mpv.setOption("demuxer-max-back-bytes", "16777216") // 16 MB
+            mpv.setOption("demuxer-readahead-secs", "86400")
+            mpv.setOption("demuxer-max-bytes", "104857600")     // 100 MiB forward
+            mpv.setOption("demuxer-max-back-bytes", "8388608")  // 8 MiB backward
             mpv.setOption("network-timeout", "90")
             mpv.setOption(
                 "stream-lavf-o",
@@ -101,18 +101,11 @@ class NativeAudioEngine(private val appContext: Context) {
             isYoutubeSource = fromYoutube
 
             mpv.setString("pause", "yes")
-            if (startPosition > 1.0) {
-                // mpv ka file option: loadfile <url> replace <index> <options>
-                mpv.command(
-                    "loadfile", url, "replace", "0",
-                    String.format(Locale.US, "start=%.3f", startPosition)
-                ).getOrThrow()
-                pendingSeek = startPosition
-                pendingSeekTries = 0
-            } else {
-                mpv.command("loadfile", url, "replace").getOrThrow()
-                pendingSeek = null
-            }
+            val options=mutableListOf(String.format(Locale.US, "start=%.3f", startPosition.coerceAtLeast(0.0)))
+            AudioTrackMemory.get(url)?.let { options += "aid=$it" }
+            mpv.command("loadfile",url,"replace","-1",options.joinToString(",")).getOrThrow()
+            pendingSeek = startPosition.takeIf { it > 1.0 }
+            pendingSeekTries = 0
             mpv.setString("pause", "no")
             playing = true
             true

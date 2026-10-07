@@ -570,7 +570,7 @@ object WebBridge {
               if (!q.options || q.options.length !== 3) {
                 q.innerHTML = '<option value="144">144p</option><option value="240">240p</option><option value="360">360p</option>';
               }
-              q.value = String(window.__wpMpvQVal || 360);
+              q.value = String(window.__wpMpvQVal || 144);
               q.classList.remove('hidden');
               q.style.display = 'inline-block';
             }
@@ -580,6 +580,7 @@ object WebBridge {
           return 'ok';
         }
         window.__wpMpvLinked = 0;
+        try { var status = document.getElementById('wp-mpv-test-status'); if(status)status.remove(); } catch(e) {}
         try { document.body.classList.remove('wp-mpv-on'); } catch (e) {}
         try { if (window.__wpMpvFsSet) window.__wpMpvFsSet(0); } catch (e) {}
         var Q = window.__wpMpvOrig || {};
@@ -676,6 +677,7 @@ object WebBridge {
     /* ---- 16d) MPV ki chuni hui quality select par dikhao ---- */
     window.__wpMpvQ = function (sel) {
       try {
+        if(window.__wpOnlyQuality)window.__wpOnlyQuality(sel);
         window.__wpMpvQVal = sel;
         var q = document.getElementById('premium-video-quality');
         if (q) {
