@@ -3,10 +3,11 @@
 
    API:
      WPActivity.show(name, kind, a, b)
-        kind = 'pause' | 'play' | 'seek' | 'join' | 'leave'
+        kind = 'pause' | 'play' | 'seek' | 'join' | 'leave' | 'msg'
         pause/play : a = time (sec)
         seek       : a = from (sec), b = to (sec)
         join/leave : (time nahi)
+        msg        : a = message text (room chat; 2 lines tak, 120 chars)
      WPActivity.fmt(sec)        -> "00:15:10"  (hamesha HH:MM:SS)
      WPActivity.isFullscreen()  -> browser (.wp-html-fs / .pp-fs / :fullscreen) ya APK (body.wp-mpv-fs)
      WPActivity.now()           -> current position: APK MPV (__wpMpvState.t) warna page ka localNow()
@@ -14,7 +15,7 @@
 
    Rules:
      - sirf fullscreen me dikhta hai (config.fullscreenOnly)
-     - column (log style): PURANA upar, NAYA neeche; max 5 ek waqt me
+     - column (log style): PURANA upar, NAYA neeche; max 5 ek waqt me (activity + msg sab mila kar)
        6th aaye to sab se purana (upar wala) FORAN nikal jata hai (smooth collapse)
      - har toast 5s, phir fade-out + collapse + remove
      - dedup sirf EXACT duplicate publish ke liye: wahi banda + wahi action + wahi time
@@ -74,8 +75,9 @@
     return f;
   }
 
-  var ICON = { pause: '❚❚', play: '▶', seek: '⏩', join: '🎉', leave: '👋' };
-  var WORD = { pause: 'Paused', play: 'Resumed', seek: 'Seek', join: 'Joined', leave: 'Left' };
+  var ICON = { pause: '❚❚', play: '▶', seek: '⏩', join: '🎉', leave: '👋', msg: '💬' };
+  var WORD = { pause: 'Paused', play: 'Resumed', seek: 'Seek', join: 'Joined', leave: 'Left', msg: '' };
+  var MSG_MAX = 120;
 
   /* fade + collapse (height -> 0) taake neeche/upar wale smooth sarkein; fast = overflow par foran */
   function remove(el, fast) {
@@ -100,6 +102,7 @@
     if (Date.now() - prev.t >= cfg.dedupMs) return false;
     if (kind === 'seek') return near(prev.b, b, 1.5);               // wahi target
     if (kind === 'pause' || kind === 'play') return near(prev.a, a, 2);
+    if (kind === 'msg') return prev.a === a;                          // wahi text
     return true;                                                      // join / leave
   }
 
@@ -107,7 +110,8 @@
     try {
       kind = String(kind || '');
       if (kind === 'resume') kind = 'play';
-      if (!WORD[kind]) return false;
+      if (!(kind in WORD)) return false;
+      if (kind === 'msg') { a = String(a == null ? '' : a).replace(/\s+/g, ' ').trim(); if (!a) return false; if (a.length > MSG_MAX) a = a.slice(0, MSG_MAX - 1) + '…'; }
       if (cfg.fullscreenOnly && !isFullscreen()) return false;
       name = String(name || 'Someone').trim().slice(0, 20) || 'Someone';
 
@@ -139,11 +143,12 @@
       el.innerHTML =
         '<div class="wp-act-ic">' + ICON[kind] + '</div>' +
         '<div class="wp-act-tx">' +
-          '<div class="wp-act-t1"><b></b> <span>' + WORD[kind] + '</span></div>' +
-          (line2 ? '<div class="wp-act-t2">' + line2 + '</div>' : '') +
+          '<div class="wp-act-t1"><b></b>' + (WORD[kind] ? ' <span>' + WORD[kind] + '</span>' : '') + '</div>' +
+          (line2 || kind === 'msg' ? '<div class="wp-act-t2">' + line2 + '</div>' : '') +
         '</div>' +
         '<div class="wp-act-life"></div>';
       el.querySelector('.wp-act-t1 b').textContent = name;   // naam textContent se (HTML-safe)
+      if (kind === 'msg') el.querySelector('.wp-act-t2').textContent = a;   // message text bhi textContent (HTML-safe)
 
       if (cfg.newestOnTop) f.insertBefore(el, f.firstChild);  // option: naya UPAR
       else f.appendChild(el);                                 // default: log style, naya NEECHE
