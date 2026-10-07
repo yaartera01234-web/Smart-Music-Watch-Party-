@@ -6,6 +6,7 @@
    WP ACTIVITY OVERLAY — player ke andar (upper-left) floating activity toasts
    "Ahmed Paused · 00:15:00", "Ahmed Seek · 00:15:10 → 00:15:20", "Sara Joined"
    - sirf fullscreen me (browser .wp-html-fs / .pp-fs / :fullscreen, APK body.wp-mpv-fs)
+   - column log style: purana upar, naya neeche; max 5 x 5s; 6th par upar wala collapse ho kar nikalta hai
    - pointer-events: none  -> video/controls kabhi block nahi hote
    - class "wpfs-keep"     -> APK ka MPV-fullscreen CSS isay hide na kare
    ═══════════════════════════════════════════════════════════════════════ */
@@ -17,7 +18,6 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
   max-width: min(64%, 290px);
   pointer-events: none;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -30,6 +30,8 @@
   position: relative;
   overflow: hidden;
   max-width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 6px 0;
   padding: 7px 12px 8px 8px;
   border-radius: 13px;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -39,11 +41,21 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   color: #fff;
   transform-origin: left center;
-  animation: wpActIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  transition: opacity 0.32s ease, transform 0.32s ease;
+  animation: wpActIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  transition: opacity 0.3s ease, transform 0.3s ease, height 0.34s ease, padding 0.34s ease, margin 0.34s ease, border-width 0.34s ease;
   will-change: transform, opacity;
 }
-.wp-act.out { opacity: 0; transform: translateX(-10px) scale(0.97); }
+/* fade-out + collapse: baaki toasts smooth sarak kar jagah bhar lete hain */
+.wp-act.out {
+  animation: none;
+  opacity: 0;
+  transform: translateX(-10px) scale(0.97);
+  height: 0 !important;
+  padding-top: 0; padding-bottom: 0;
+  margin-bottom: 0;
+  border-top-width: 0; border-bottom-width: 0;
+}
+.wp-act.out.fast { transition-duration: 0.18s; }       /* overflow (6th aaya) -> purana foran */
 .wp-act.pulse { animation: wpActPulse 0.32s ease; }
 
 .wp-act-ic {
@@ -95,7 +107,7 @@
   background: linear-gradient(90deg, #ff5ebc, #8b72ff, #54e8ff);
   opacity: 0.55;
   transform-origin: left center;
-  animation: wpActLife var(--wp-act-ms, 3500ms) linear forwards;
+  animation: wpActLife var(--wp-act-ms, 5000ms) linear forwards;
 }
 
 @keyframes wpActIn {
@@ -111,8 +123,8 @@
 
 /* mobile / chhoti screen */
 @media (max-width: 500px) {
-  #wp-act-feed { left: max(9px, env(safe-area-inset-left, 0px)); top: 40px; gap: 5px; max-width: min(70%, 240px); }
-  .wp-act { padding: 6px 10px 7px 7px; border-radius: 11px; gap: 8px; }
+  #wp-act-feed { left: max(9px, env(safe-area-inset-left, 0px)); top: 40px; max-width: min(70%, 240px); }
+  .wp-act { padding: 6px 10px 7px 7px; margin-bottom: 5px; border-radius: 11px; gap: 8px; }
   .wp-act-ic { width: 23px; height: 23px; font-size: 10px; }
   .wp-act-t1 { font-size: 11.5px; }
   .wp-act-t2 { font-size: 10px; }
@@ -122,7 +134,7 @@
 body.wp-mpv-fs #wp-act-feed { display: flex !important; }
 
 @media (prefers-reduced-motion: reduce) {
-  .wp-act { animation: none; transition: opacity 0.2s ease; }
+  .wp-act { animation: none; transition: opacity 0.2s ease, height 0.2s ease, padding 0.2s ease, margin 0.2s ease; }
   .wp-act.out { transform: none; }
 }
 </style>
@@ -139,20 +151,24 @@ body.wp-mpv-fs #wp-act-feed { display: flex !important; }
      WPActivity.fmt(sec)        -> "00:15:10"  (hamesha HH:MM:SS)
      WPActivity.isFullscreen()  -> browser (.wp-html-fs / .pp-fs / :fullscreen) ya APK (body.wp-mpv-fs)
      WPActivity.now()           -> current position: APK MPV (__wpMpvState.t) warna page ka localNow()
+     WPActivity.config          -> { duration, dedupMs, max, newestOnTop, fullscreenOnly } (runtime tweak)
 
    Rules:
      - sirf fullscreen me dikhta hai (config.fullscreenOnly)
-     - same naam + same action 2.5s me ek dafa (double-publish dedup)
-     - latest sab se upar, max 4 stack, har toast ~3.5s, phir fade-out + remove
+     - column (log style): PURANA upar, NAYA neeche; max 5 ek waqt me
+       6th aaye to sab se purana (upar wala) FORAN nikal jata hai (smooth collapse)
+     - har toast 5s, phir fade-out + collapse + remove
+     - dedup sirf EXACT duplicate publish ke liye: wahi banda + wahi action + wahi time
+       (2.5s ke andar, aur beech me us bande ka koi aur action na ho) -> sirf pulse.
+       Doosri seek (alag target) / pause->play->pause = alag events = alag toasts.
      - pointer-events none -> playback / controls kabhi block nahi
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
   if (window.WPActivity) return;
 
-  var cfg = { duration: 3500, dedupMs: 2500, max: 4, fullscreenOnly: true };
-  var last = {};            // "name|kind" -> timestamp (dedup)
-  var lastEl = {};          // "name|kind" -> element (dedup par pulse)
+  var cfg = { duration: 5000, dedupMs: 2500, max: 5, newestOnTop: false, fullscreenOnly: true };
+  var lastBy = {};          // name -> { kind, a, b, t, el }  (sirf us bande ka AAKHRI event)
 
   function wrap() { return document.querySelector('.player-wrap'); }
 
@@ -202,11 +218,30 @@ body.wp-mpv-fs #wp-act-feed { display: flex !important; }
   var ICON = { pause: '❚❚', play: '▶', seek: '⏩', join: '🎉', leave: '👋' };
   var WORD = { pause: 'Paused', play: 'Resumed', seek: 'Seek', join: 'Joined', leave: 'Left' };
 
-  function remove(el) {
+  /* fade + collapse (height -> 0) taake neeche/upar wale smooth sarkein; fast = overflow par foran */
+  function remove(el, fast) {
     if (!el || el.__gone) return;
     el.__gone = true;
+    clearTimeout(el.__t);
+    try { el.style.height = el.offsetHeight + 'px'; void el.offsetWidth; } catch (e) {}
     el.classList.add('out');
-    setTimeout(function () { try { el.parentNode && el.parentNode.removeChild(el); } catch (e) {} }, 360);
+    if (fast) el.classList.add('fast');
+    setTimeout(function () { try { el.parentNode && el.parentNode.removeChild(el); } catch (e) {} }, fast ? 220 : 400);
+  }
+
+  function near(x, y, tol) {
+    x = Number(x); y = Number(y);
+    var fx = isFinite(x), fy = isFinite(y);
+    if (!fx || !fy) return fx === fy;        // dono khali -> barabar
+    return Math.abs(x - y) <= tol;
+  }
+  /* exact duplicate? (same system ka double publish: user:true + 800ms debounce / seek echo) */
+  function isDup(prev, kind, a, b) {
+    if (!prev || prev.kind !== kind) return false;
+    if (Date.now() - prev.t >= cfg.dedupMs) return false;
+    if (kind === 'seek') return near(prev.b, b, 1.5);               // wahi target
+    if (kind === 'pause' || kind === 'play') return near(prev.a, a, 2);
+    return true;                                                      // join / leave
   }
 
   function show(name, kind, a, b) {
@@ -217,15 +252,13 @@ body.wp-mpv-fs #wp-act-feed { display: flex !important; }
       if (cfg.fullscreenOnly && !isFullscreen()) return false;
       name = String(name || 'Someone').trim().slice(0, 20) || 'Someone';
 
-      /* dedup: wahi banda, wahi action, 2.5s ke andar -> dobara nahi (sirf halka pulse) */
-      var key = name.toLowerCase() + '|' + kind;
-      var t = Date.now();
-      if (last[key] && (t - last[key]) < cfg.dedupMs) {
-        var pe = lastEl[key];
+      var nk = name.toLowerCase(), t = Date.now();
+      var prev = lastBy[nk];
+      if (isDup(prev, kind, a, b)) {
+        var pe = prev.el;
         if (pe && !pe.__gone) { pe.classList.remove('pulse'); void pe.offsetWidth; pe.classList.add('pulse'); }
         return false;
       }
-      last[key] = t;
 
       var f = feed();
       if (!f) return false;
@@ -253,14 +286,16 @@ body.wp-mpv-fs #wp-act-feed { display: flex !important; }
         '<div class="wp-act-life"></div>';
       el.querySelector('.wp-act-t1 b').textContent = name;   // naam textContent se (HTML-safe)
 
-      f.insertBefore(el, f.firstChild);                      // latest sab se UPAR
-      lastEl[key] = el;
+      if (cfg.newestOnTop) f.insertBefore(el, f.firstChild);  // option: naya UPAR
+      else f.appendChild(el);                                 // default: log style, naya NEECHE
+      lastBy[nk] = { kind: kind, a: a, b: b, t: t, el: el };
 
-      /* zyada ho gaye -> sab se purane hatao */
-      var kids = f.querySelectorAll('.wp-act:not(.out)');
-      for (var i = cfg.max; i < kids.length; i++) remove(kids[i]);
+      /* max se zyada -> sab se PURANE foran nikaalo (log style me upar wale) */
+      var live = f.querySelectorAll('.wp-act:not(.out)');
+      var extra = live.length - cfg.max;
+      for (var i = 0; i < extra; i++) remove(cfg.newestOnTop ? live[live.length - 1 - i] : live[i], true);
 
-      setTimeout(function () { remove(el); }, cfg.duration);
+      el.__t = setTimeout(function () { remove(el); }, cfg.duration);
       return true;
     } catch (e) { return false; }
   }
@@ -269,7 +304,7 @@ body.wp-mpv-fs #wp-act-feed { display: flex !important; }
     var f = document.getElementById('wp-act-feed');
     if (!f) return;
     var kids = f.querySelectorAll('.wp-act');
-    for (var i = 0; i < kids.length; i++) remove(kids[i]);
+    for (var i = 0; i < kids.length; i++) remove(kids[i], true);
   }
 
   window.WPActivity = { show: show, fmt: fmt, isFullscreen: isFullscreen, now: now, clear: clear, config: cfg };

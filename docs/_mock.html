@@ -77,7 +77,7 @@
 <body>
 <div class="page">
   <h1>🎬 Player Activity Overlay — Sample</h1>
-  <p class="sub">Yeh <b>asli module</b> hai (same CSS + JS jo <code>party-final1.html</code> me jayega) — neeche mock player me chala kar dekhein. Toast <b>upper-left</b>, glass/blur, latest upar, ~3.5s baad fade-out. Video/controls block nahi hote.</p>
+  <p class="sub">Yeh <b>asli module</b> hai (same CSS + JS jo <code>party-final1.html</code> me jayega) — neeche mock player me chala kar dekhein. Toast <b>upper-left</b>, glass/blur, log-style column (purana upar, naya neeche), 5s baad fade-out + collapse. Video/controls block nahi hote.</p>
 
   <!-- ══ MOCK PLAYER (asli page ke class/id names) ══ -->
   <div class="player-wrap" id="wrap">
@@ -143,8 +143,8 @@
     <h3>📐 Spec</h3>
     <div class="spec">
       <div><b>Position</b>Upper-left, badge/title row ke neeche (top 46px)</div>
-      <div><b>Duration</b>3.5s, phir 320ms fade/slide-out → DOM se remove</div>
-      <div><b>Stack</b>Latest sab se upar · max 4 · purane auto-hat jaate hain</div>
+      <div><b>Duration</b>5s, phir fade + collapse → DOM se remove</div>
+      <div><b>Stack</b>Purana upar, naya neeche · max 5 · 6th aaye to sab se purana foran nikal jata hai</div>
       <div><b>Dedup</b>Same naam + same action 2.5s me ek dafa (double-publish fix)</div>
       <div><b>Time</b>Hamesha HH:MM:SS · APK me MPV ka time, browser me player ka</div>
       <div><b>Safety</b>pointer-events: none · z-index 40 · wpfs-keep (APK FS CSS)</div>

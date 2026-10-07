@@ -10,20 +10,24 @@
      WPActivity.fmt(sec)        -> "00:15:10"  (hamesha HH:MM:SS)
      WPActivity.isFullscreen()  -> browser (.wp-html-fs / .pp-fs / :fullscreen) ya APK (body.wp-mpv-fs)
      WPActivity.now()           -> current position: APK MPV (__wpMpvState.t) warna page ka localNow()
+     WPActivity.config          -> { duration, dedupMs, max, newestOnTop, fullscreenOnly } (runtime tweak)
 
    Rules:
      - sirf fullscreen me dikhta hai (config.fullscreenOnly)
-     - same naam + same action 2.5s me ek dafa (double-publish dedup)
-     - latest sab se upar, max 4 stack, har toast ~3.5s, phir fade-out + remove
+     - column (log style): PURANA upar, NAYA neeche; max 5 ek waqt me
+       6th aaye to sab se purana (upar wala) FORAN nikal jata hai (smooth collapse)
+     - har toast 5s, phir fade-out + collapse + remove
+     - dedup sirf EXACT duplicate publish ke liye: wahi banda + wahi action + wahi time
+       (2.5s ke andar, aur beech me us bande ka koi aur action na ho) -> sirf pulse.
+       Doosri seek (alag target) / pause->play->pause = alag events = alag toasts.
      - pointer-events none -> playback / controls kabhi block nahi
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
   if (window.WPActivity) return;
 
-  var cfg = { duration: 3500, dedupMs: 2500, max: 4, fullscreenOnly: true };
-  var last = {};            // "name|kind" -> timestamp (dedup)
-  var lastEl = {};          // "name|kind" -> element (dedup par pulse)
+  var cfg = { duration: 5000, dedupMs: 2500, max: 5, newestOnTop: false, fullscreenOnly: true };
+  var lastBy = {};          // name -> { kind, a, b, t, el }  (sirf us bande ka AAKHRI event)
 
   function wrap() { return document.querySelector('.player-wrap'); }
 
@@ -73,11 +77,30 @@
   var ICON = { pause: '❚❚', play: '▶', seek: '⏩', join: '🎉', leave: '👋' };
   var WORD = { pause: 'Paused', play: 'Resumed', seek: 'Seek', join: 'Joined', leave: 'Left' };
 
-  function remove(el) {
+  /* fade + collapse (height -> 0) taake neeche/upar wale smooth sarkein; fast = overflow par foran */
+  function remove(el, fast) {
     if (!el || el.__gone) return;
     el.__gone = true;
+    clearTimeout(el.__t);
+    try { el.style.height = el.offsetHeight + 'px'; void el.offsetWidth; } catch (e) {}
     el.classList.add('out');
-    setTimeout(function () { try { el.parentNode && el.parentNode.removeChild(el); } catch (e) {} }, 360);
+    if (fast) el.classList.add('fast');
+    setTimeout(function () { try { el.parentNode && el.parentNode.removeChild(el); } catch (e) {} }, fast ? 220 : 400);
+  }
+
+  function near(x, y, tol) {
+    x = Number(x); y = Number(y);
+    var fx = isFinite(x), fy = isFinite(y);
+    if (!fx || !fy) return fx === fy;        // dono khali -> barabar
+    return Math.abs(x - y) <= tol;
+  }
+  /* exact duplicate? (same system ka double publish: user:true + 800ms debounce / seek echo) */
+  function isDup(prev, kind, a, b) {
+    if (!prev || prev.kind !== kind) return false;
+    if (Date.now() - prev.t >= cfg.dedupMs) return false;
+    if (kind === 'seek') return near(prev.b, b, 1.5);               // wahi target
+    if (kind === 'pause' || kind === 'play') return near(prev.a, a, 2);
+    return true;                                                      // join / leave
   }
 
   function show(name, kind, a, b) {
@@ -88,15 +111,13 @@
       if (cfg.fullscreenOnly && !isFullscreen()) return false;
       name = String(name || 'Someone').trim().slice(0, 20) || 'Someone';
 
-      /* dedup: wahi banda, wahi action, 2.5s ke andar -> dobara nahi (sirf halka pulse) */
-      var key = name.toLowerCase() + '|' + kind;
-      var t = Date.now();
-      if (last[key] && (t - last[key]) < cfg.dedupMs) {
-        var pe = lastEl[key];
+      var nk = name.toLowerCase(), t = Date.now();
+      var prev = lastBy[nk];
+      if (isDup(prev, kind, a, b)) {
+        var pe = prev.el;
         if (pe && !pe.__gone) { pe.classList.remove('pulse'); void pe.offsetWidth; pe.classList.add('pulse'); }
         return false;
       }
-      last[key] = t;
 
       var f = feed();
       if (!f) return false;
@@ -124,14 +145,16 @@
         '<div class="wp-act-life"></div>';
       el.querySelector('.wp-act-t1 b').textContent = name;   // naam textContent se (HTML-safe)
 
-      f.insertBefore(el, f.firstChild);                      // latest sab se UPAR
-      lastEl[key] = el;
+      if (cfg.newestOnTop) f.insertBefore(el, f.firstChild);  // option: naya UPAR
+      else f.appendChild(el);                                 // default: log style, naya NEECHE
+      lastBy[nk] = { kind: kind, a: a, b: b, t: t, el: el };
 
-      /* zyada ho gaye -> sab se purane hatao */
-      var kids = f.querySelectorAll('.wp-act:not(.out)');
-      for (var i = cfg.max; i < kids.length; i++) remove(kids[i]);
+      /* max se zyada -> sab se PURANE foran nikaalo (log style me upar wale) */
+      var live = f.querySelectorAll('.wp-act:not(.out)');
+      var extra = live.length - cfg.max;
+      for (var i = 0; i < extra; i++) remove(cfg.newestOnTop ? live[live.length - 1 - i] : live[i], true);
 
-      setTimeout(function () { remove(el); }, cfg.duration);
+      el.__t = setTimeout(function () { remove(el); }, cfg.duration);
       return true;
     } catch (e) { return false; }
   }
@@ -140,7 +163,7 @@
     var f = document.getElementById('wp-act-feed');
     if (!f) return;
     var kids = f.querySelectorAll('.wp-act');
-    for (var i = 0; i < kids.length; i++) remove(kids[i]);
+    for (var i = 0; i < kids.length; i++) remove(kids[i], true);
   }
 
   window.WPActivity = { show: show, fmt: fmt, isFullscreen: isFullscreen, now: now, clear: clear, config: cfg };
