@@ -183,6 +183,9 @@ body.wp-mpv-fs #wp-act-feed > .wp-act { display: flex !important; }
        (2.5s ke andar, aur beech me us bande ka koi aur action na ho) -> sirf pulse.
        Doosri seek (alag target) / pause->play->pause = alag events = alag toasts.
      - pointer-events none -> playback / controls kabhi block nahi
+     - APK native MPV fullscreen (window.__wpMpvFsOn): WebView invisible hota hai, is liye
+       toast DOM ki bajaye YaarNative.wpActivity(json) ko jata hai (app wahi design natively banata hai).
+       Browser / purane APK me YaarNative.wpActivity nahi hota -> yeh raasta kabhi nahi chalta.
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -218,6 +221,15 @@ body.wp-mpv-fs #wp-act-feed > .wp-act { display: flex !important; }
     } catch (e) {}
     try { if (typeof window.localNow === 'function') return Number(window.localNow()) || 0; } catch (e) {}
     return 0;
+  }
+
+  /* APK (v117-MPV023-ACT1+): native fullscreen me toast app ko do */
+  function nativeSink() {
+    try {
+      var N = window.YaarNative;
+      if (window.__wpMpvFsOn && N && typeof N.wpActivity === 'function') return N;
+    } catch (e) {}
+    return null;
   }
 
   function feed() {
@@ -273,7 +285,8 @@ body.wp-mpv-fs #wp-act-feed > .wp-act { display: flex !important; }
       if (kind === 'resume') kind = 'play';
       if (!(kind in WORD)) return false;
       if (kind === 'msg') { a = String(a == null ? '' : a).replace(/\s+/g, ' ').trim(); if (!a) return false; if (a.length > MSG_MAX) a = a.slice(0, MSG_MAX - 1) + '…'; }
-      if (cfg.fullscreenOnly && !isFullscreen()) return false;
+      var sink = nativeSink();
+      if (cfg.fullscreenOnly && !sink && !isFullscreen()) return false;
       name = String(name || 'Someone').trim().slice(0, 20) || 'Someone';
 
       var nk = name.toLowerCase(), t = Date.now();
@@ -284,6 +297,25 @@ body.wp-mpv-fs #wp-act-feed > .wp-act { display: flex !important; }
         return false;
       }
 
+      /* doosri line (plain text) */
+      var plain = '';
+      if (kind === 'seek') {
+        var from = Number(a), to = Number(b);
+        if (isFinite(from) && isFinite(to)) plain = fmt(from) + ' → ' + fmt(to);
+        else if (isFinite(to)) plain = fmt(to);
+        else if (isFinite(from)) plain = fmt(from);
+      } else if (kind === 'pause' || kind === 'play') {
+        if (a !== undefined && a !== null && isFinite(Number(a))) plain = fmt(a);
+      } else if (kind === 'msg') {
+        plain = a;
+      }
+
+      if (sink) {   /* APK native fullscreen: app draws it (same dedup/limits already applied above) */
+        try { sink.wpActivity(JSON.stringify({ name: name, kind: kind, t1: WORD[kind], t2: plain, ms: cfg.duration })); } catch (e) {}
+        lastBy[nk] = { kind: kind, a: a, b: b, t: t, el: null };
+        return true;
+      }
+
       var f = feed();
       if (!f) return false;
 
@@ -291,15 +323,7 @@ body.wp-mpv-fs #wp-act-feed > .wp-act { display: flex !important; }
       el.className = 'wp-act ' + kind;
       el.style.setProperty('--wp-act-ms', cfg.duration + 'ms');
 
-      var line2 = '';
-      if (kind === 'seek') {
-        var from = Number(a), to = Number(b);
-        if (isFinite(from) && isFinite(to)) line2 = fmt(from) + '<span class="arr">→</span>' + fmt(to);
-        else if (isFinite(to)) line2 = fmt(to);
-        else if (isFinite(from)) line2 = fmt(from);
-      } else if (kind === 'pause' || kind === 'play') {
-        if (a !== undefined && a !== null && isFinite(Number(a))) line2 = fmt(a);
-      }
+      var line2 = (kind === 'seek') ? plain.replace(' → ', '<span class="arr">→</span>') : (kind === 'msg' ? '' : plain);
 
       el.innerHTML =
         '<div class="wp-act-ic">' + ICON[kind] + '</div>' +

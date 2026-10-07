@@ -518,6 +518,14 @@ class MainActivity : Activity() {
                 runOnUiThread { handleMpvCommand(cmd) }
             }
 
+            /* v54: website ka fullscreen activity toast (Paused/Seek/Resumed/Joined/Left/msg) -> native fullscreen column.
+               Native fullscreen me WebView invisible hota hai (web.alpha = 0), is liye page JSON yahan bhejta hai. */
+            @android.webkit.JavascriptInterface
+            fun wpActivity(json: String?) {
+                val j = json ?: return
+                runOnUiThread { try { fullscreenControls?.activity(j) } catch (_: Throwable) {} }
+            }
+
             /* Page par naya YouTube item aaya -> foran kaam shuru (iframe pehle bajne se bachao) */
             @android.webkit.JavascriptInterface
             fun ytSeen(id: String?) {
