@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music" // Original package; same signing key and data
         minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 131 // ACT3: corner patches HAR Android par (outline clip 12+ ke sath double) + 1.5dp bleed
-        versionName = "117-MPV023-ACT3"
+        versionCode = 132 // ACT4: surface 2px inset — upar/neeche sliver ("pichla player") khatam
+        versionName = "117-MPV023-ACT4"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
