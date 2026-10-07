@@ -130,8 +130,12 @@
   .wp-act-t2 { font-size: 10px; }
 }
 
-/* APK: MPV fullscreen me player ke bachon ko hide karne wala rule — hum (wpfs-keep) bache rahen */
+/* APK (WebBridge): MPV fullscreen me do rules hain —
+     body.wp-mpv-fs .wpfs-keep > *:not(.wpfs-keep) { display:none !important }   (specificity 0,3,1)
+   feed ko .wpfs-keep diya hai, magar uske bachay (.wp-act) is rule me aa jate — is liye
+   id-wali (1,2,1) !important rules se dono ko wapas dikhao. */
 body.wp-mpv-fs #wp-act-feed { display: flex !important; }
+body.wp-mpv-fs #wp-act-feed > .wp-act { display: flex !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .wp-act { animation: none; transition: opacity 0.2s ease, height 0.2s ease, padding 0.2s ease, margin 0.2s ease; }
