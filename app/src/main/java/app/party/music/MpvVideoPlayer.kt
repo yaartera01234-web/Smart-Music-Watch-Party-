@@ -317,9 +317,10 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
         }
     }
 
-    /** Android < 12: MPV ke UPAR magar WebView ke NEECHE 4 chhote patch views banao (main thread). */
+    /** 4 corner-patch views banao (main thread): MPV ke UPAR magar WebView ke NEECHE.
+        ACT3: HAR Android par bante hain — outline clip (12+) ke sath sath double-suraksha. */
     private fun ensureMasks(v: View) {
-        if (Build.VERSION.SDK_INT >= 31 || masks != null || v.parent !== root) return
+        if (masks != null || v.parent !== root) return
         try {
             val arr = arrayOf(CornerMaskView(act, 0), CornerMaskView(act, 1), CornerMaskView(act, 2), CornerMaskView(act, 3))
             for (m in arr) {
@@ -341,16 +342,24 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
             val lp = if (v != null) v.layoutParams as? FrameLayout.LayoutParams else null
             val ok = !fullscreen && r > 0f && v != null && v.visibility == View.VISIBLE && lp != null &&
                 lp.width > 0 && lp.height > 0
+            val bleed = (1.5f * act.resources.displayMetrics.density).toInt().coerceAtLeast(1)
             for (m in arr) {
                 if (!ok) { if (m.visibility != View.GONE) m.visibility = View.GONE; continue }
-                val rp = r.toInt().coerceAtLeast(1)
-                val mx = if (m.corner == 1 || m.corner == 3) lp.leftMargin + lp.width - rp else lp.leftMargin
-                val my = if (m.corner == 2 || m.corner == 3) lp.topMargin + lp.height - rp else lp.topMargin
+                val rInt = r.toInt().coerceAtLeast(1)
+                val size = rInt + bleed   // patch gol se 1.5dp BAHAR tak jata hai (koi patli line na bache)
+                val mx = when (m.corner) {
+                    1, 3 -> lp.leftMargin + lp.width - rInt
+                    else -> lp.leftMargin - bleed
+                }
+                val my = when (m.corner) {
+                    2, 3 -> lp.topMargin + lp.height - rInt
+                    else -> lp.topMargin - bleed
+                }
                 m.radius = r
                 if (m.visibility != View.VISIBLE) m.visibility = View.VISIBLE
                 val mlp = m.layoutParams as FrameLayout.LayoutParams
-                if (mlp.width != rp || mlp.height != rp || mlp.leftMargin != mx || mlp.topMargin != my) {
-                    mlp.width = rp; mlp.height = rp; mlp.leftMargin = mx; mlp.topMargin = my
+                if (mlp.width != size || mlp.height != size || mlp.leftMargin != mx || mlp.topMargin != my) {
+                    mlp.width = size; mlp.height = size; mlp.leftMargin = mx; mlp.topMargin = my
                     m.layoutParams = mlp
                 }
                 m.invalidate()
@@ -386,12 +395,10 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
             paint.color = lerpColor(baseColor, 0xFF302B63L.toInt(), t)
             path.reset()
             path.addRect(0f, 0f, w, h, Path.Direction.CCW)
-            when (corner) {
-                0 -> path.addCircle(r, r, r, Path.Direction.CW)
-                1 -> path.addCircle(w - r, r, r, Path.Direction.CW)
-                2 -> path.addCircle(r, h - r, r, Path.Direction.CW)
-                else -> path.addCircle(w - r, h - r, r, Path.Direction.CW)
-            }
+            // Gol ka markaz MPV rect ke corner se r andar; patch bahar ki taraf 1.5dp phaila hai
+            val cx = if (corner == 0 || corner == 2) w else 0f
+            val cy = if (corner == 0 || corner == 1) h else 0f
+            path.addCircle(cx, cy, r, Path.Direction.CW)
             path.fillType = Path.FillType.EVEN_ODD
             c.drawPath(path, paint)
         }
