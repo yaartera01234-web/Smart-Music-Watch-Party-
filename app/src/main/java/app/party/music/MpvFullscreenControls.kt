@@ -56,6 +56,8 @@ internal class MpvFullscreenControls(
     private val aspect=Button(act)
     private val q=Button(act)
     private val hud=TextView(act)
+    /* v54: website ke fullscreen activity toasts (Paused/Seek/Joined/Left/msg) ka native column — WebView yahan invisible hai */
+    private val feed=WpActivityFeed(act)
     private val hideTask=Runnable { if(!player.isPaused()&&!dragging&&!dialogOpen)showControls(false) }
 
     init {
@@ -71,6 +73,7 @@ internal class MpvFullscreenControls(
         val brand=TextView(act);brand.text="WATCH PARTY  /  MPV";brand.textSize=10f;brand.setTextColor(accent);brand.letterSpacing=.12f
         title.textSize=17f;title.setTextColor(Color.WHITE);title.maxLines=1;title.ellipsize=TextUtils.TruncateAt.END
         heading.addView(brand);heading.addView(title);top.addView(heading,LinearLayout.LayoutParams(0,-2,1f))
+        addView(feed,LayoutParams(-2,-2,Gravity.TOP or Gravity.START).apply{topMargin=dp(74);leftMargin=dp(18)})
         middle.orientation=LinearLayout.HORIZONTAL;middle.gravity=Gravity.CENTER
         middle.background=rounded(0x8820152d.toInt(),40f)
         middle.setPadding(dp(8),dp(4),dp(8),dp(4))
@@ -107,6 +110,7 @@ internal class MpvFullscreenControls(
             val left=cutout?.safeInsetLeft?:0;val right=cutout?.safeInsetRight?:0
             top.setPadding(dp(18)+left,dp(8),dp(18)+right,dp(8))
             bottom.setPadding(dp(26)+left,dp(12),dp(26)+right,dp(12))
+            (feed.layoutParams as? LayoutParams)?.let{lp->if(lp.leftMargin!=dp(18)+left){lp.leftMargin=dp(18)+left;feed.layoutParams=lp}}
             insets
         }
         immerse();tick();wake()
@@ -170,6 +174,8 @@ internal class MpvFullscreenControls(
             .setSingleChoiceItems(qs.map{"${it}p"}.toTypedArray(),qs.indexOf(quality())){d,i->send("quality:${qs[i]}");d.dismiss()}.setNegativeButton("Close",null).create()
         dialog.setOnDismissListener{dialogOpen=false;immerse();wake()};dialog.show()
     }
+    /** v54: page (YaarNative.wpActivity) se aaya toast JSON -> column. Decorative only; playback/controls par koi asar nahi. */
+    fun activity(json:String?):Boolean=feed.show(json)
     private fun showControls(show:Boolean){controlsVisible=show;val visible=if(show)VISIBLE else INVISIBLE;top.visibility=visible;bottom.visibility=visible;middle.visibility=visible}
     private fun wake(){showControls(true);handler.removeCallbacks(hideTask);handler.postDelayed(hideTask,3200)}
     override fun onInterceptTouchEvent(e:MotionEvent):Boolean{
@@ -203,6 +209,7 @@ internal class MpvFullscreenControls(
     override fun performClick():Boolean{super.performClick();return true}
     fun release(){
         handler.removeCallbacksAndMessages(null)
+        feed.clear()
         act.window.attributes=act.window.attributes.apply{screenBrightness=oldBrightness}
         if(Build.VERSION.SDK_INT>=28)act.window.attributes=act.window.attributes.apply{layoutInDisplayCutoutMode=oldCutoutMode}
         if(Build.VERSION.SDK_INT>=30)act.window.setDecorFitsSystemWindows(true)
