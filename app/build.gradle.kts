@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music" // Original package; same signing key and data
         minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 129 // v54 fullscreen activity overlay (native twin of the website toasts)
-        versionName = "117-MPV023-ACT1"
+        versionCode = 130 // ACT2: MPV surface gol corners (12+ outline clip, <12 corner patches) + swipe-away web.destroy hardening
+        versionName = "117-MPV023-ACT2"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
