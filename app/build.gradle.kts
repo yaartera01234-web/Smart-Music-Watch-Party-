@@ -8,12 +8,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.party.music.test"  // ⚠️ TEST BUILD — alag package (side-by-side install, original app chhua nahi jayega)
-        minSdk = 24
+        applicationId = "app.party.music" // Original package; same signing key and data
+        minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 118                      // TEST v2
-        versionName = "117-TEST-QA2"
-        manifestPlaceholders["appLabel"] = "Music WP TEST"   // asli app se pehchaan ke liye
+        versionCode = 130 // ACT2: MPV surface gol corners (12+ outline clip, <12 corner patches) + swipe-away web.destroy hardening
+        versionName = "117-MPV023-ACT2"
+        manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -38,6 +38,7 @@ android {
     }
 
     packaging {
+        jniLibs.useLegacyPackaging = true
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/DEPENDENCIES")
     }
 }
@@ -68,6 +69,7 @@ dependencies {
     // YouTube VIDEO ke liye — MpvView (surface wala view). Isi ke through video page ke peeche dikhti hai.
     implementation("io.github.yuroyami:libmpvkt-view:0.3.0")
     // YouTube ke liye asli audio stream URL (MPV ko YouTube ka page nahi, seedha stream milta hai)
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
-    implementation("org.jsoup:jsoup:1.17.2")
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
