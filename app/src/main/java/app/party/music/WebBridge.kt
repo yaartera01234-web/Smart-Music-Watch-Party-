@@ -374,7 +374,7 @@ object WebBridge {
         bars[3].style.cssText = base + 'left:0;top:' + (y + h) + 'px;right:0;height:' + bot + 'px;';
         for (var m = 0; m < 4; m++) bars[m].style.display = 'block';
         window.__wpMpvHole = 1;
-        return JSON.stringify({ x: x, y: y, w: w, h: h, mini: !!(wrap.classList && wrap.classList.contains('mini')) });
+        return JSON.stringify({ x: x, y: y, w: w, h: h, mini: !!(wrap.classList && wrap.classList.contains('mini')), bg: col });
       } catch (e) { return 'fail'; }
     };
 

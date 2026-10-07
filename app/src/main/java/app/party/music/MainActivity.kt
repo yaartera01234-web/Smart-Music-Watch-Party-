@@ -1612,7 +1612,10 @@ class MainActivity : Activity() {
            Screen lock / Home par isFinishing false hota hai, is liye wahan audio chalta rehta hai. */
         try {
             if (isFinishing) {
+                // ACT2 hardening: swipe-away par leaked page (WebView + handlers) hi stale sync ka sabab tha.
+                try { handoffHandler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
                 try { mpvVideo.destroy() } catch (t: Throwable) {}
+                try { val p = web.parent; if (p is android.view.ViewGroup) p.removeView(web); web.destroy() } catch (t: Throwable) {}
                 MusicService.stopNativeHard()
                 MusicService.clearCaches()   // build 11: kaam khatam -> URLs/queue bhi RAM se saaf
                 MusicService.stop(this)
