@@ -1,4 +1,4 @@
-name: MPV023 ACT1 — original package, exact Synkplay 0.23.0 engine + fullscreen activity overlay
+name: MPV023 ACT2 — original package, exact Synkplay 0.23.0 engine + rounded video corners + swipe-away hardening
 
 on:
   push:
@@ -25,19 +25,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Original identity; app logic unchanged except the v54 activity overlay
+      - name: Original identity; app logic unchanged except overlay + corner fix
         run: |
           # Against the approved MPV023 FINAL source only these files may differ:
-          # the native fullscreen toast column (new), its 2 wiring points and its unit test.
+          # ACT1: the native fullscreen toast column (new), its 2 wiring points and its unit test.
+          # ACT2: rounded MPV surface corners (MpvVideoPlayer) + holeJs bg field (WebBridge)
+          #       + setRect mini/bg pass and onDestroy hardening (MainActivity).
           git diff --name-only d33ade5919b205b8c457a1281c15d4715db8b39e -- app/src | sort > /tmp/changed.txt
           printf '%s\n' \
             app/src/main/java/app/party/music/MainActivity.kt \
             app/src/main/java/app/party/music/MpvFullscreenControls.kt \
+            app/src/main/java/app/party/music/MpvVideoPlayer.kt \
+            app/src/main/java/app/party/music/WebBridge.kt \
             app/src/main/java/app/party/music/WpActivityFeed.kt \
             app/src/test/java/app/party/music/WpActivityItemTest.kt | sort | diff - /tmp/changed.txt
           git diff --exit-code d33ade5919b205b8c457a1281c15d4715db8b39e -- app/src/main/assets app/src/main/res app/src/main/AndroidManifest.xml
           grep -F 'applicationId = "app.party.music"' app/build.gradle.kts
-          grep -F 'versionName = "117-MPV023-ACT1"' app/build.gradle.kts
+          grep -F 'versionName = "117-MPV023-ACT2"' app/build.gradle.kts
           echo '1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6  app/src/main/res/raw/ytdlp' | sha256sum -c -
       - name: Existing regression checks
         run: |
@@ -62,8 +66,8 @@ jobs:
           set -euo pipefail
           SDK="$ANDROID_HOME/build-tools/35.0.0"
           BASE=app/build/outputs/apk/debug/app-debug.apk
-          APK=Music-Watch-Party-117-MPV023-ACT1.apk
-          "$SDK/aapt" dump badging "$BASE" | grep -F "package: name='app.party.music' versionCode='129' versionName='117-MPV023-ACT1'"
+          APK=Music-Watch-Party-117-MPV023-ACT2.apk
+          "$SDK/aapt" dump badging "$BASE" | grep -F "package: name='app.party.music' versionCode='130' versionName='117-MPV023-ACT2'"
           python tests/mpv023/engine_swap.py swap --work /tmp/mpv023 --base "$BASE" --output /tmp/mpv023/unsigned.apk
           "$SDK/zipalign" -P 16 -f 4 /tmp/mpv023/unsigned.apk /tmp/mpv023/aligned.apk
           "$SDK/apksigner" sign --ks keystore/party.jks --ks-key-alias party --ks-pass pass:party123 --key-pass pass:party123 --out "$APK" /tmp/mpv023/aligned.apk
@@ -71,43 +75,48 @@ jobs:
           grep -F '842e2d5518d28a1d0c3aff8a16646cead9c58a619884a21a6a41792c04bffb33' /tmp/mpv023/signature.txt
           "$SDK/zipalign" -c -P 16 4 "$APK"
           python tests/mpv023/engine_swap.py verify --work /tmp/mpv023 --base "$BASE" --output "$APK"
-          "$SDK/aapt" dump badging "$APK" | grep -F "package: name='app.party.music' versionCode='129' versionName='117-MPV023-ACT1'"
+          "$SDK/aapt" dump badging "$APK" | grep -F "package: name='app.party.music' versionCode='130' versionName='117-MPV023-ACT2'"
           sha256sum "$APK" > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Music-Watch-Party-MPV023-ACT1
+          name: Music-Watch-Party-MPV023-ACT2
           path: |
-            Music-Watch-Party-117-MPV023-ACT1.apk
+            Music-Watch-Party-117-MPV023-ACT2.apk
             SHA256SUMS.txt
             tests/mpv023/manifest.json
             tests/mpv023/README.md
             app/build/reports/tests/testDebugUnitTest/
-      - name: Publish original-package update (ACT1)
+      - name: Publish original-package update (ACT2)
         if: github.ref == 'refs/heads/release/v117-mpv-final'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v117-mpv023-act1
+          tag_name: v117-mpv023-act2
           target_commitish: ${{ github.sha }}
           prerelease: false
           make_latest: true
-          name: 'Music Watch Party 117 — MPV023 ACT1 (fullscreen activity overlay)'
+          name: 'Music Watch Party 117 — MPV023 ACT2 (rounded corners + swipe-away fix)'
           body: |
-            Update over MPV023 FINAL: original app.party.music / Music Watch Party.
-            versionCode129 / 117-MPV023-ACT1. Same original signing certificate.
-            NEW: in the native MPV fullscreen, the Watch Party activity column
-            (Ahmed Paused 00:15:00 / Seek 00:15:10 → 00:15:20 / Resumed / Joined / Left / room chat)
-            is drawn natively, fed by the website's existing sync hooks via YaarNative.wpActivity.
-            Decorative only: playback, sync, controls and gestures are untouched.
+            Update over ACT1: original app.party.music / Music Watch Party.
+            versionCode130 / 117-MPV023-ACT2. Same original signing certificate.
+            NEW: the MPV video surface now has ROUNDED CORNERS matching the page card
+            (Android 12+: real outline clip; Android 8-11: 4 native corner patches fed by
+            the page background color via holeJs). Mini bar uses the small radius;
+            fullscreen stays square. No more picture spilling past the rounded frame.
+            NEW: swipe-away hardening - finishing the app now destroys the WebView and
+            clears pending handlers (no more leaked stale page).
+            Decorative only: playback, sync, controls, gestures and the activity column
+            are untouched.
             Install over the original app; do NOT uninstall it. Original app data is retained.
             Android 8+ / arm64-v8a only (required by this native bundle).
             Exact nine native libraries from Synkplay Android v0.23.0 release:
             MPV v0.41.0-252-gc401ef9c3 / FFmpeg N-123143-g0540b42657.
             Existing Kotlin wrapper retained; unmodified JNI adapter source rebuilt
             against the matching FFmpeg62 ABI. Not a copy of Synkplay's full player.
-            App source otherwise unchanged (only WpActivityFeed.kt + 2 wiring points differ from FINAL);
+            App source otherwise unchanged (only WpActivityFeed.kt, MpvFullscreenControls.kt,
+            MpvVideoPlayer.kt, WebBridge.kt, MainActivity.kt + unit test differ from FINAL);
             resolver, sync, controls, GIF, calls and lifecycle unchanged.
             Published after user authorization; build checks do not prove handset playback.
             Provenance, pinned sources and GPL notices: tests/mpv023 in repository.
           files: |
-            Music-Watch-Party-117-MPV023-ACT1.apk
+            Music-Watch-Party-117-MPV023-ACT2.apk
             SHA256SUMS.txt
