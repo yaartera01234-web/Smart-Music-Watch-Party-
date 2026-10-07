@@ -200,10 +200,16 @@ class MpvVideoPlayer(private val act: Activity, private val root: FrameLayout) {
                     cornerDp = if (mini) 13f else 21f
                     if (Build.VERSION.SDK_INT >= 31) v.invalidateOutline()
                     val d = act.resources.displayMetrics.density
+                    // ACT4: surface ko card ke andar 2 CSS px inset karo — upar/neeche wali
+                    // patli sliver ("pichla player") rounding ke farq se bahar jhankti thi.
+                    val inset = 2f
                     val lp = v.layoutParams as FrameLayout.LayoutParams
-                    val nw = (w * d).toInt(); val nh = (h * d).toInt()
-                    val nx = (x * d).toInt(); val ny = (y * d).toInt()
-                    if (lp.width != nw || lp.height != nh || lp.leftMargin != nx || lp.topMargin != ny) {
+                    val nw = ((w - 2 * inset) * d).toInt()
+                    val nh = ((h - 2 * inset) * d).toInt()
+                    val nx = ((x + inset) * d).toInt()
+                    val ny = ((y + inset) * d).toInt()
+                    if (nw > 40 && nh > 40 &&
+                        (lp.width != nw || lp.height != nh || lp.leftMargin != nx || lp.topMargin != ny)) {
                         lp.width = nw; lp.height = nh; lp.leftMargin = nx; lp.topMargin = ny
                         v.layoutParams = lp
                     }
