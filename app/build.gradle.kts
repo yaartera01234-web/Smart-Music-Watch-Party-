@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music" // Original package; same signing key and data
         minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 134 // ACT6: native kaan — lock screen par bhi room ke stop/change sunai denge (presence ACT5 wali)
-        versionName = "117-MPV023-ACT6"
+        versionCode = 135 // ACT7: native haath — lock par room ka stop/change seedha MpvVideoPlayer par (notification-buttons wala rasta)
+        versionName = "117-MPV023-ACT7"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
