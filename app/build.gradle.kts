@@ -11,8 +11,8 @@ android {
         applicationId = "app.party.music" // Original package; same signing key and data
         minSdk = 26 // Matches the reference Synkplay Android minimum
         targetSdk = 35
-        versionCode = 132 // ACT4: surface 2px inset — upar/neeche sliver ("pichla player") khatam
-        versionName = "117-MPV023-ACT4"
+        versionCode = 133 // ACT5: pure-native presence (NativePresence/Paho) — lock screen par jab tak song chale, Left na ho
+        versionName = "117-MPV023-ACT5"
         manifestPlaceholders["appLabel"] = "Music Watch Party"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -68,6 +68,8 @@ dependencies {
     implementation("io.github.yuroyami:libmpvkt:0.3.0")
     // YouTube VIDEO ke liye — MpvView (surface wala view). Isi ke through video page ke peeche dikhti hai.
     implementation("io.github.yuroyami:libmpvkt-view:0.3.0")
+    // ACT5: native MQTT presence (lock-screen proof) — wahi towers jo page use karta hai
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     // YouTube ke liye asli audio stream URL (MPV ko YouTube ka page nahi, seedha stream milta hai)
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     testImplementation("junit:junit:4.13.2")
