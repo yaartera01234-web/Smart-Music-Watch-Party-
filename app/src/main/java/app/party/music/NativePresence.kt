@@ -3,8 +3,11 @@ package app.party.music
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttClient
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
+import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -23,6 +26,17 @@ import java.util.concurrent.Executors
  * Page (v59) publishPresence() ke sath YaarNative.wpPresence(cfg) bhejta hai — config
  * (room/id/name/avatar/tower) taaza rehta hai jab tak page jaag raha hai; page sota hai
  * to yahi aakhri config se refresh hoti rehti hai. wpRoomLeave/app band -> clean Left.
+ *
+ * ACT6 — NATIVE KAAN (room commands on lock screen):
+ * Wahi zinda client ab ROOM/cmd, ROOM/state, ROOM/queue bhi SUBSCRIBE karti hai.
+ * Jo bhi aaye wo onMessage hook se page ke onMsg() tak pahunchta hai — is liye lock
+ * par bhi room ka STOP/seek/naya-song lock wale ke player par lagu hota hai (pehle
+ * wo purana song chalata rehta tha / playlist ka next khud chala leta tha).
+ * Duplicate delivery ka khatra nahi (page jaag raha ho to uske client se bhi aata hai):
+ * page ke onMsg me dup(rid/mid) pehle se hai. Purana page (v59 se purana) ho to
+ * window.__wpNativeRoomMsg nahi hoga -> hook chup-chaap no-op, ACT5 wala behave.
+ * Force-kill (swipe/Force Stop/crash) par ab broker WILL bhi jata hai — empty retained
+ * member entry = sacha Left (pehle app aise hi gayab ho jati thi).
  */
 object NativePresence {
     private const val TAG = "WPNativePresence"
@@ -32,6 +46,13 @@ object NativePresence {
     @Volatile private var client: MqttClient? = null
     @Volatile private var cfg: JSONObject? = null
     @Volatile private var running = false
+
+    /**
+     * ACT6: page kaan — (topic, payload) room ke cmd/state/queue messages ka.
+     * MainActivity isay set karti hai (page ke onMsg tak evaluateJavascript se).
+     * Null = koi kaan nahi (purana page / destroy ho chuka) -> forward band.
+     */
+    @Volatile var onMessage: ((String, String) -> Unit)? = null
 
     /** Tower URLs — page ke BROKERS se bilkul same order (0=EMQX, 1=HiveMQ, 2=tyckr). */
     private val URLS = arrayOf(
@@ -120,7 +141,40 @@ object NativePresence {
                 keepAliveInterval = 60
                 isAutomaticReconnect = true
                 maxInflight = 10
+                /* ACT6: force-kill (swipe/Force Stop/crash) par broker khud Left bhej dega
+                   (empty retained member entry — page ka members handler isi ko Left samajhta hai). */
+                try {
+                    setWill(o.optString("room") + "/members/" + o.optString("id"),
+                        ByteArray(0), 1, true)
+                } catch (t: Throwable) { Log.w(TAG, "will set fail", t) }
             }
+            /* ACT6: kaan — connect (aur har auto-reconnect) ke baad room topics subscribe.
+               cleanSession=true hai is liye har connect par dobara subscribe zaroori hai. */
+            c.setCallback(object : MqttCallbackExtended {
+                override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                    try {
+                        val r = o.optString("room")
+                        c.subscribe(arrayOf(r + "/cmd", r + "/state", r + "/queue"),
+                            intArrayOf(1, 1, 1))
+                        Log.i(TAG, "native room-ears UP" + (if (reconnect) " (re)" else "") + ": $serverURI")
+                    } catch (t: Throwable) { Log.w(TAG, "room subscribe fail", t) }
+                }
+
+                override fun connectionLost(cause: Throwable?) {
+                    Log.w(TAG, "native connection lost (auto-reconnect on)")
+                }
+
+                override fun messageArrived(topic: String?, message: MqttMessage?) {
+                    val t = topic ?: return
+                    val h = onMessage ?: return
+                    val p = String(message?.payload ?: ByteArray(0))
+                    main.post {
+                        try { h(t, p) } catch (_: Throwable) {}
+                    }
+                }
+
+                override fun deliveryComplete(token: IMqttDeliveryToken?) {}
+            })
             c.connect(opts)
             client = c
             Log.i(TAG, "native presence UP: $url")

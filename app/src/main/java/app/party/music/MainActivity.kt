@@ -421,6 +421,18 @@ class MainActivity : Activity() {
         try { ensureBatteryExemption() } catch (t: Throwable) {}
 
         // v25 bridge: page se native player kholne ke liye (window.YaarNative.openPlayer)
+        // ACT6: native presence client lock screen par room ke cmd/state/queue sunti hai —
+        // har message page ke onMsg() tak (window.__wpNativeRoomMsg — v60 page).
+        // Purana page ho to hook nahi hoga -> koi asar nahi (ACT5 wala behave).
+        NativePresence.onMessage = { topic, payload ->
+            runOnUiThread {
+                try {
+                    val t = org.json.JSONObject.quote(topic)
+                    val p = org.json.JSONObject.quote(payload)
+                    web.evaluateJavascript("(window.__wpNativeRoomMsg||function(){})($t,$p)", null)
+                } catch (_: Throwable) {}
+            }
+        }
         web.addJavascriptInterface(object {
             @android.webkit.JavascriptInterface
             fun openPlayer(videoUrl: String, title: String?) { runOnUiThread { openNative(videoUrl,title) } }
@@ -1627,6 +1639,7 @@ class MainActivity : Activity() {
                 try { handoffHandler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
                 try { mpvVideo.destroy() } catch (t: Throwable) {}
                 try { val p = web.parent; if (p is android.view.ViewGroup) p.removeView(web); web.destroy() } catch (t: Throwable) {}
+                try { NativePresence.onMessage = null } catch (t: Throwable) {}   // ACT6: page gaya -> kaan band
                 try { NativePresence.stop(true) } catch (t: Throwable) {}   // ACT5: app khatam = sacha Left
                 MusicService.stopNativeHard()
                 MusicService.clearCaches()   // build 11: kaam khatam -> URLs/queue bhi RAM se saaf
