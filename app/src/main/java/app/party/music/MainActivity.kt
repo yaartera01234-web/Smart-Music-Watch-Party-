@@ -425,6 +425,17 @@ class MainActivity : Activity() {
             @android.webkit.JavascriptInterface
             fun openPlayer(videoUrl: String, title: String?) { runOnUiThread { openNative(videoUrl,title) } }
 
+            /* ACT5: native presence — page (publishPresence ke sath) config bhejta hai; page so
+               jaye to bhi NativePresence (wake lock wali side) member refresh karti rehti hai. */
+            @android.webkit.JavascriptInterface
+            fun wpPresence(json: String?) {
+                if (json.isNullOrBlank()) return
+                try { NativePresence.start(json) } catch (t: Throwable) { Log.e("MusicParty", "wpPresence", t) }
+            }
+
+            @android.webkit.JavascriptInterface
+            fun wpPresenceStop() { try { NativePresence.stop(true) } catch (t: Throwable) {} }
+
             /* v26: DM notification — page se aati hai, sirf jab app saamne na ho */
             @android.webkit.JavascriptInterface
             fun notify(title: String?, text: String?) { postNote(title, text, null) }
@@ -1616,6 +1627,7 @@ class MainActivity : Activity() {
                 try { handoffHandler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
                 try { mpvVideo.destroy() } catch (t: Throwable) {}
                 try { val p = web.parent; if (p is android.view.ViewGroup) p.removeView(web); web.destroy() } catch (t: Throwable) {}
+                try { NativePresence.stop(true) } catch (t: Throwable) {}   // ACT5: app khatam = sacha Left
                 MusicService.stopNativeHard()
                 MusicService.clearCaches()   // build 11: kaam khatam -> URLs/queue bhi RAM se saaf
                 MusicService.stop(this)
