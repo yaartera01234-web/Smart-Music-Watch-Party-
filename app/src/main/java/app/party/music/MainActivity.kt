@@ -421,12 +421,52 @@ class MainActivity : Activity() {
         try { ensureBatteryExemption() } catch (t: Throwable) {}
 
         // v25 bridge: page se native player kholne ke liye (window.YaarNative.openPlayer)
-        // ACT6: native presence client lock screen par room ke cmd/state/queue sunti hai —
-        // har message page ke onMsg() tak (window.__wpNativeRoomMsg — v60 page).
-        // Purana page ho to hook nahi hoga -> koi asar nahi (ACT5 wala behave).
+        // ACT7: ACT6 ka kaan ab do raston wala faisla karta hai —
+        //  - page jaag raha (resumed=true): purana tuned rasta (forward -> onMsg) — bilkul ACT6, zero regression
+        //  - page soya/band: NativeControl (seedha MpvVideoPlayer) — wahi rasta jo notification
+        //    ke pause/play buttons lock par use karte hain (sabit hai ke lock me chalta hai)
+        NativeControl.applyCmd = { c -> run {
+            try {
+                if (!::mpvVideo.isInitialized) return@run false
+                val t = c.optDouble("time", Double.NaN)
+                when (c.optString("action")) {
+                    "pause" -> { try { mpvVideo.pause() } catch (_: Throwable) {}; true }
+                    "play" -> {
+                        try {
+                            if (!t.isNaN() && kotlin.math.abs(mpvVideo.position() - t) > 2.0) mpvVideo.seekTo(t)
+                        } catch (_: Throwable) {}
+                        try { mpvVideo.resume() } catch (_: Throwable) {}
+                        true
+                    }
+                    "sync" -> {
+                        try { if (!t.isNaN()) mpvVideo.seekTo(t) } catch (_: Throwable) {}
+                        if (c.optBoolean("playing", true)) try { mpvVideo.resume() } catch (_: Throwable) {}
+                        else try { mpvVideo.pause() } catch (_: Throwable) {}
+                        true
+                    }
+                    "seek" -> {
+                        if (!t.isNaN() && t >= 0.0) { try { mpvVideo.seekTo(t) } catch (_: Throwable) {}; true } else false
+                    }
+                    "load" -> {
+                        val v = c.optJSONObject("video") ?: return@run false
+                        val url = v.optString("url", "")
+                        val low = url.substringBefore('?').lowercase()
+                        val direct = low.endsWith(".mp4") || low.endsWith(".mp3") ||
+                            low.endsWith(".m3u8") || low.endsWith(".mkv") || low.endsWith(".webm")
+                        if (!url.startsWith("http") || !direct) return@run false   // YT/unknown — unlock par page
+                        try {
+                            mpvVideo.play(url, if (t.isNaN()) 0.0 else t, startMuted = false)
+                        } catch (_: Throwable) { return@run false }
+                        true
+                    }
+                    else -> false
+                }
+            } catch (_: Throwable) { false }
+        } }
         NativePresence.onMessage = { topic, payload ->
             runOnUiThread {
                 try {
+                    if (!resumed) NativeControl.apply(topic, payload)   // ACT7: lock/background -> native haath
                     val t = org.json.JSONObject.quote(topic)
                     val p = org.json.JSONObject.quote(payload)
                     web.evaluateJavascript("(window.__wpNativeRoomMsg||function(){})($t,$p)", null)
@@ -1639,6 +1679,7 @@ class MainActivity : Activity() {
                 try { handoffHandler.removeCallbacksAndMessages(null) } catch (t: Throwable) {}
                 try { mpvVideo.destroy() } catch (t: Throwable) {}
                 try { val p = web.parent; if (p is android.view.ViewGroup) p.removeView(web); web.destroy() } catch (t: Throwable) {}
+                try { NativeControl.applyCmd = null } catch (t: Throwable) {}   // ACT7: player gaya -> haath band
                 try { NativePresence.onMessage = null } catch (t: Throwable) {}   // ACT6: page gaya -> kaan band
                 try { NativePresence.stop(true) } catch (t: Throwable) {}   // ACT5: app khatam = sacha Left
                 MusicService.stopNativeHard()
